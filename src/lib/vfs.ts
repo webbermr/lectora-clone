@@ -11,6 +11,12 @@ let ready: Promise<void> | null = null;
 export function ensureServiceWorker(): Promise<void> {
   if (!ready) {
     ready = (async () => {
+      if (!window.isSecureContext) {
+        // Browsers only allow service workers over HTTPS (or on localhost).
+        throw new Error(
+          `This editor must be opened over HTTPS (or on localhost) to show course pages. It was opened at ${location.origin}. Ask whoever hosts it to put it behind HTTPS.`,
+        );
+      }
       if (!('serviceWorker' in navigator)) {
         throw new Error('This browser does not support service workers, which the preview needs.');
       }

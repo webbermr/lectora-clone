@@ -199,6 +199,33 @@ the project, page and view you had open. If part of the editor fails, it shows t
 - **Storage.** Projects live in this browser's IndexedDB. Clearing site data
   deletes them, so publish a `.zip` as your backup.
 
+## Deploy with Docker
+
+The editor is a static web app: everything runs in the browser, and projects are saved in each
+user's own browser (IndexedDB). The container only serves files, keeps no data and needs no volumes.
+
+```bash
+docker compose up -d --build        # or:
+docker build -t lectora-clone . && docker run -d -p 8080:8080 lectora-clone
+```
+
+Then open http://localhost:8080. `docker build --build-arg RUN_TESTS=true …` also runs the unit tests
+during the build.
+
+- **HTTPS is required** anywhere but `localhost`. Course pages are shown through a service worker,
+  and browsers only allow those over HTTPS. Put the container behind your usual HTTPS reverse proxy
+  or load balancer (nginx, Caddy, Traefik, IIS, a cloud load balancer). Opened over plain HTTP from
+  another machine, the editor says so instead of showing pages.
+- It works at the site root or under a path (`https://tools.example.com/lectora/`) with no rebuild;
+  have the proxy strip the path prefix (e.g. nginx `location /lectora/ { proxy_pass http://lectora:8080/; }`).
+- The image is nginx serving the built files, running as a non-root user on port 8080, with a
+  `/healthz` endpoint and a Docker health check. `docker-compose.yml` also runs it read-only.
+- Each user's projects live in their own browser on their own machine. Clearing browser data deletes
+  them, and they don't move between computers, so publish a `.zip` as the backup and the way to hand
+  a course to someone else.
+- Updating: rebuild and restart the container. `index.html` and `sw.js` are served uncached and the
+  other files have content-hashed names, so users get the new version on their next page load.
+
 ## Development
 
 ```bash

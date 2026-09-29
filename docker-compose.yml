@@ -1,0 +1,12 @@
+services:
+  lectora-clone:
+    build: .
+    image: lectora-clone:latest
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
