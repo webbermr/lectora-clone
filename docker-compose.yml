@@ -1,0 +1,38 @@
+services:
+  lectora-clone:
+    build: .
+    image: lectora-clone:latest
+    # Plain HTTP, for this computer only (browsers allow it on localhost).
+    # Other computers use the HTTPS service below.
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  # HTTPS for other people on your network:
+  #   SITE_ADDRESS=192.168.1.50 docker compose --profile https up -d
+  https:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    depends_on:
+      - lectora-clone
+    ports:
+      - "443:443"
+      - "80:80"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+      SITE_NAME: ${SITE_NAME:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Keeps Caddy's certificate authority, so computers only have to trust it once.
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

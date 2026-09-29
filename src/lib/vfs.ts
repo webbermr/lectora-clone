@@ -11,10 +11,26 @@ let ready: Promise<void> | null = null;
 export function ensureServiceWorker(): Promise<void> {
   if (!ready) {
     ready = (async () => {
+      if (!window.isSecureContext) {
+        // Browsers only allow service workers over HTTPS (or on localhost).
+        throw new Error(
+          `This editor must be opened over HTTPS (or on localhost) to show course pages. It was opened at ${location.origin}. Ask whoever hosts it to put it behind HTTPS.`,
+        );
+      }
       if (!('serviceWorker' in navigator)) {
         throw new Error('This browser does not support service workers, which the preview needs.');
       }
-      await navigator.serviceWorker.register(new URL('sw.js', document.baseURI).href);
+      try {
+        await navigator.serviceWorker.register(new URL('sw.js', document.baseURI).href);
+      } catch (e) {
+        // Clicking through a browser's certificate warning isn't enough for service workers.
+        if (/certificate|SSL/i.test(String((e as Error)?.message ?? e))) {
+          throw new Error(
+            `This computer doesn't trust the certificate for ${location.host}, so course pages can't be shown. Install the editor's root certificate on this computer (see "Let other people on your network use it" in the README), then restart the browser.`,
+          );
+        }
+        throw e;
+      }
       await navigator.serviceWorker.ready;
     })();
   }
