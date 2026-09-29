@@ -92,6 +92,31 @@ export function DeleteDialog() {
                 </ul>
               </section>
             )}
+            {plan.tests.length > 0 && (
+              <section className="finishable">
+                <h4>📝 Test updated (and re-encrypted)</h4>
+                <ul className="plain-list small">
+                  {plan.tests.map((t) => (
+                    <li key={t.file}>
+                      {t.questionsRemoved} question{t.questionsRemoved === 1 ? '' : 's'} removed from the test
+                      {t.sectionsRemoved.length ? `; ${t.sectionsRemoved.length} section${t.sectionsRemoved.length > 1 ? 's' : ''} removed (no questions left)` : ''}.
+                      {t.numrandom.map((n) => (
+                        <div key={n.section}>A section that drew {n.before} random questions now draws {n.after}, all it has left.</div>
+                      ))}
+                      {t.relinked.map((r) => (
+                        <div key={r.setting}>
+                          The test's {{ passdone: 'pass', cancelfail: 'fail', prevpage: 'back' }[r.setting] ?? r.setting} page was deleted; it now goes to{' '}
+                          <span className="mono">{r.to}</span>.
+                        </div>
+                      ))}
+                      <div>
+                        Questions per attempt: {t.drawn.before} → <b>{t.drawn.after}</b>. The file stays encrypted, so learners still can't read the answers.
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             {plan.toc.length > 0 && (
               <section>
                 <h4>📑 Table of contents updated</h4>

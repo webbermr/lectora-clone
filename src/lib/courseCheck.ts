@@ -4,6 +4,7 @@
  */
 import { textOf } from './assetRefs';
 import { findProgressTotals, readLectoraCourse, TRACKING_FILE, trackedPages } from './lectora';
+import { testPages, type openTests } from './lectoraTest';
 import type { ManifestModel } from './manifest';
 import type { FileMap } from './package';
 import { basename, isHtmlFile, isTextFile, resolveFrom } from './paths';
@@ -32,7 +33,7 @@ const PAGE_REF = /['"]([^'"\s<>()]+?\.html?)(?:[?#][^'"]*)?['"]/gi;
 const RUNTIME_FILE = /^(trivantis[\w.-]*|jquery[\w.-]*|mediaelement[\w.-]*|es6-promise[\w.-]*|enc|aria-utils|apiwrapper\w*|scofunctions|dialog|trivantis-player)\.js$/i;
 const IGNORE_REF = /^(https?:|mailto:|javascript:|data:|\/\/)|\+/i;
 
-export function checkCourse(files: FileMap, manifest: ManifestModel | null): CheckResult {
+export function checkCourse(files: FileMap, manifest: ManifestModel | null, tests?: ReturnType<typeof openTests>): CheckResult {
   const issues: Issue[] = [];
   const add = (severity: Severity, kind: string, message: string, file?: string) => issues.push({ severity, kind, message, file });
   const pages = Object.keys(files).filter(isHtmlFile);
@@ -119,6 +120,23 @@ export function checkCourse(files: FileMap, manifest: ManifestModel | null): Che
         TRACKING_FILE,
       );
     }
+  }
+
+  // --- Tests ---------------------------------------------------------------------------
+  if (tests && 'xml' in tests) {
+    for (const [file, xml] of tests.xml) {
+      const missing = testPages(xml).filter((p) => !files[p] && !Object.keys(files).some((f) => basename(f) === basename(p)));
+      if (missing.length) {
+        add('error', 'Test', `The test lists ${missing.length} page(s) that aren't in the package (${missing.slice(0, 3).join(', ')}). It may stop or score wrongly when it reaches them.`, file);
+      }
+      for (const sec of xml.match(/<section>[\s\S]*?<\/section>/g) ?? []) {
+        const draw = Number(/<numrandom>(\d+)<\/numrandom>/.exec(sec.slice(0, sec.search(/<page[\s>]/)))?.[1] ?? 0);
+        const have = (sec.match(/<page[\s>]/g) ?? []).length;
+        if (draw > have) add('error', 'Test', `A test section draws ${draw} questions but only has ${have}.`, file);
+      }
+    }
+  } else if (tests && 'error' in tests) {
+    add('info', 'Test', tests.error);
   }
 
   // --- Fixed progress totals the pages can no longer reach ---------------------------

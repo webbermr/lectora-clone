@@ -240,3 +240,66 @@ describe('titles', () => {
     expect(gs.children.map((c) => c.title)).toContain('How To Navigate');
   });
 });
+
+describe('deleting test questions', () => {
+  it('decrypts the test with the package\'s own enc.js and trivantis-titlemgr.js', async () => {
+    const { openTests } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const t = openTests(files);
+    expect(t && 'xml' in t).toBe(true);
+    const xml = (t as { xml: Map<string, string> }).xml.get('_tobj700.txt')!;
+    expect(xml).toContain('<name>a001_test_module_1_q2.html</name>');
+  });
+
+  it('removes questions, keeps the draw within what is left, and re-encrypts', async () => {
+    const { openTests, testPages } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const tests = openTests(files)!;
+    const m = parseManifest(text(files, 'imsmanifest.xml'));
+    const plan = planDelete(files, m, ['a001_test_module_1_q1.html', 'a001_test_module_1_q2.html'], { tests });
+    expect(plan.blocked).toBeUndefined();
+    expect(plan.tests).toEqual([
+      {
+        file: '_tobj700.txt',
+        questionsRemoved: 2,
+        sectionsRemoved: [],
+        numrandom: [{ section: '710', before: 2, after: 1 }],
+        relinked: [],
+        drawn: { before: 4, after: 3 },
+      },
+    ]);
+    const xml = plan.testXml.get('_tobj700.txt')!;
+    expect(testPages(xml)).toEqual(['a001_test_module_1_q3.html', 'a001_test_module_2_q1.html', 'a001_test_module_2_q2.html', 'a001_test_test_results.html']);
+    // Section 2 starts where its first question now sits; pages count up with no gaps.
+    expect([...xml.matchAll(/<section>\s*<index>(\d+)/g)].map((x) => x[1])).toEqual(['0', '1']);
+
+    // Encrypted as the flow would, then read back by the package's own code.
+    const sealed = (tests as { cipher: { encrypt(x: string): string } }).cipher.encrypt(xml);
+    expect(sealed.startsWith('U2FsdGVkX1')).toBe(true);
+    const after = apply(files, [...planChanges(plan), { path: '_tobj700.txt', bytes: new TextEncoder().encode(sealed) }]);
+    const reopened = openTests(after) as { xml: Map<string, string> };
+    expect(reopened.xml.get('_tobj700.txt')).toBe(xml);
+    const r = checkCourse(after, parseManifest(text(after, 'imsmanifest.xml')), openTests(after));
+    expect(r.issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('removes a whole section and protects the results page', async () => {
+    const { openTests } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const tests = openTests(files)!;
+    const m = parseManifest(text(files, 'imsmanifest.xml'));
+    const plan = planDelete(files, m, ['a001_test_module_2_q1.html', 'a001_test_module_2_q2.html'], { tests });
+    expect(plan.tests[0].sectionsRemoved).toEqual(['720']);
+    expect(plan.tests[0].drawn).toEqual({ before: 4, after: 2 });
+    expect(planDelete(files, m, ['a001_test_test_results.html'], { tests }).blocked).toMatch(/results page/);
+  });
+
+  it('course check catches a test that lists missing pages', async () => {
+    const { openTests } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const crude = { ...files };
+    delete crude['a001_test_module_1_q1.html'];
+    const r = checkCourse(crude, parseManifest(text(crude, 'imsmanifest.xml')), openTests(crude));
+    expect(r.issues.find((i) => i.kind === 'Test')?.message).toContain('a001_test_module_1_q1.html');
+  });
+});

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { live, textNodesOf, useLive, type AssetKind, type PageAsset } from '../lib/live';
+import { assetKind, live, textNodesOf, useLive, type AssetKind, type PageAsset } from '../lib/live';
+import { aspectRatio, formatFromName, imageInfo, replacementMismatches, type ImageInfo } from '../lib/imageInfo';
 import { basename, dirname, extname, isImageFile } from '../lib/paths';
 import { visibleText } from '../lib/sourceMatch';
-import { useStore } from '../lib/store';
+import { store, useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
 
 /** Properties for the element selected in Live edit. */
@@ -48,6 +49,8 @@ function Selected({ el }: { el: Element }) {
                 <img src={vfsUrl(s.project!.id, asset.path) + '?v=' + (s.revisions[asset.path] ?? 0)} alt="" />
               </div>
             )}
+            {isImageFile(asset.path) && <ImageSpecs path={asset.path} element={el} />}
+            {asset.kind === 'media' && <MediaPlayer path={asset.path} />}
             <button onClick={() => upload.current?.click()}>Replace file…</button>
             <input
               ref={upload}
@@ -57,7 +60,7 @@ function Selected({ el }: { el: Element }) {
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 e.target.value = '';
-                if (f) await live.replaceAsset(asset.path, f);
+                if (f) await replaceChecked(asset.path, f);
               }}
             />
             <p className="hint wide-cell">The new file keeps the old name, so every page that uses it picks it up.</p>
@@ -139,6 +142,7 @@ function PageAssets() {
   const s = useStore();
   const lv = useLive();
   const [filter, setFilter] = useState<AssetKind | 'all'>('all');
+  const [playing, setPlaying] = useState<string | null>(null);
   const [, rescan] = useState(0);
   // The page's runtime can add or swap objects at any time (timers, actions, slide changes).
   useEffect(() => {
@@ -176,7 +180,7 @@ function PageAssets() {
             <summary>{KIND_LABEL[k]} ({group.length})</summary>
             <ul className="asset-list">
               {group.map((a) => (
-                <AssetRow key={a.path} asset={a} />
+                <AssetRow key={a.path} asset={a} playing={playing === a.path} onPlay={(on) => setPlaying(on ? a.path : null)} />
               ))}
             </ul>
           </details>
@@ -190,19 +194,13 @@ function PageAssets() {
   );
 }
 
-function AssetRow({ asset }: { asset: PageAsset }) {
+function AssetRow({ asset, playing, onPlay }: { asset: PageAsset; playing: boolean; onPlay: (on: boolean) => void }) {
   const s = useStore();
   const input = useRef<HTMLInputElement>(null);
-  const [dims, setDims] = useState('');
   const src = vfsUrl(s.project!.id, asset.path) + '?v=' + (s.revisions[asset.path] ?? 0);
   const onScreen = asset.elements.find((e) => e.isConnected);
-
-  useEffect(() => {
-    if (asset.kind !== 'image') return;
-    const img = new Image();
-    img.onload = () => setDims(img.naturalWidth && img.naturalHeight ? `${img.naturalWidth}×${img.naturalHeight}` : '');
-    img.src = src;
-  }, [src, asset.kind]);
+  const info = asset.kind === 'image' ? imageInfoOf(s.project!.files[asset.path]) : null;
+  const playable = asset.kind === 'audio' || asset.kind === 'video';
 
   return (
     <li className="asset-row">
@@ -211,8 +209,15 @@ function AssetRow({ asset }: { asset: PageAsset }) {
       </div>
       <div className="asset-info">
         <div className="asset-name" title={asset.path}>{basename(asset.path)}</div>
-        <div className="muted small asset-meta">
-          {[extname(asset.path).toUpperCase(), formatBytes(asset.bytes), dims, dirname(asset.path) && dirname(asset.path) + '/'].filter(Boolean).join(' · ')}
+        <div className="muted small asset-meta" title={asset.path}>
+          {[
+            info && info.format !== 'Unknown' ? info.format : extname(asset.path).toUpperCase(),
+            info?.width && info.height ? `${info.width} × ${info.height} px` : '',
+            formatBytes(asset.bytes),
+            dirname(asset.path) && dirname(asset.path) + '/',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </div>
         <div className="small">
           {onScreen ? (
@@ -223,6 +228,11 @@ function AssetRow({ asset }: { asset: PageAsset }) {
         </div>
       </div>
       <div className="asset-actions">
+        {playable && (
+          <button className={playing ? 'active' : ''} title={playing ? 'Stop' : 'Play'} onClick={() => onPlay(!playing)}>
+            {playing ? '■ Stop' : '▶ Play'}
+          </button>
+        )}
         {onScreen && (
           <button
             title="Select it on the page"
@@ -243,10 +253,136 @@ function AssetRow({ asset }: { asset: PageAsset }) {
           onChange={async (e) => {
             const f = e.target.files?.[0];
             e.target.value = '';
-            if (f) await live.replaceAsset(asset.path, f);
+            if (f) await replaceChecked(asset.path, f);
           }}
         />
       </div>
+      {playing && playable && (
+        <div className="asset-extra">
+          <MediaPlayer path={asset.path} autoPlay />
+        </div>
+      )}
+      {asset.kind === 'image' && (
+        <details className="asset-extra specs">
+          <summary className="small">Replacement specs</summary>
+          <ImageSpecs path={asset.path} element={onScreen} />
+        </details>
+      )}
     </li>
   );
+}
+
+/** Decoding image headers is cheap, but not free on a 5,000-image course; cache by file bytes. */
+const infoCache = new WeakMap<Uint8Array, ImageInfo>();
+function imageInfoOf(bytes: Uint8Array | undefined): ImageInfo | null {
+  if (!bytes) return null;
+  let info = infoCache.get(bytes);
+  if (!info) {
+    info = imageInfo(bytes);
+    infoCache.set(bytes, info);
+  }
+  return info;
+}
+
+/** What a replacement image needs to be, read from the file itself. */
+function ImageSpecs({ path, element }: { path: string; element?: Element }) {
+  const s = useStore();
+  const info = imageInfoOf(s.project!.files[path]);
+  const [copied, setCopied] = useState(false);
+  if (!info) return null;
+  const size = info.width && info.height ? `${info.width} × ${info.height} px` : 'size unknown';
+  const ratio = info.width && info.height ? aspectRatio(info.width, info.height) : '';
+  // How big the page actually draws it, which can differ from the file's own size.
+  const box = element && element.isConnected ? element.getBoundingClientRect() : null;
+  const shown = box && box.width && box.height ? `${Math.round(box.width)} × ${Math.round(box.height)} px` : null;
+  const mislabelled = formatFromName(path) && info.format !== 'Unknown' && formatFromName(path) !== info.format;
+  const spec =
+    info.format === 'SVG'
+      ? `An SVG (vector) image${ratio ? ` with a ${ratio} shape (${size})` : ''}.`
+      : `A ${info.format} image, ${size}${ratio ? ` (${ratio})` : ''}${info.transparent ? ', with a transparent background' : ''}.`;
+
+  return (
+    <div className="image-specs small">
+      <dl>
+        <dt>Type</dt>
+        <dd>
+          {info.format}
+          {mislabelled ? ` (named .${extname(path)})` : ''}
+          {info.animated ? ', animated' : ''}
+        </dd>
+        <dt>Size</dt>
+        <dd>
+          {size}
+          {ratio ? ` · ${ratio}` : ''}
+        </dd>
+        {shown && (
+          <>
+            <dt>Shown at</dt>
+            <dd>{shown} on this page</dd>
+          </>
+        )}
+        <dt>Background</dt>
+        <dd>{info.transparent === undefined ? 'n/a' : info.transparent ? 'transparent' : 'solid'}</dd>
+      </dl>
+      <p className="muted">
+        To replace it, make {spec.charAt(0).toLowerCase() + spec.slice(1)} A larger image with the same shape is fine; it's scaled
+        down.
+      </p>
+      <button
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(`${basename(path)}: ${spec}${shown ? ` Shown at ${shown}.` : ''}`);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          } catch {
+            /* clipboard blocked; the specs are on screen anyway */
+          }
+        }}
+      >
+        {copied ? '✓ Copied' : 'Copy specs'}
+      </button>
+    </div>
+  );
+}
+
+function formatTime(sec: number): string {
+  if (!isFinite(sec)) return '';
+  const m = Math.floor(sec / 60);
+  return `${m}:${String(Math.round(sec % 60)).padStart(2, '0')}`;
+}
+
+/** Plays an audio or video file from the package, with its length (and size, for video). */
+function MediaPlayer({ path, autoPlay }: { path: string; autoPlay?: boolean }) {
+  const s = useStore();
+  const [meta, setMeta] = useState('');
+  const src = vfsUrl(s.project!.id, path) + '?v=' + (s.revisions[path] ?? 0);
+  const isVideo = assetKind(path) === 'video';
+  const onMeta = (e: React.SyntheticEvent<HTMLMediaElement>) => {
+    const m = e.currentTarget;
+    const v = m as HTMLVideoElement;
+    setMeta([formatTime(m.duration), isVideo && v.videoWidth ? `${v.videoWidth} × ${v.videoHeight} px` : ''].filter(Boolean).join(' · '));
+  };
+  const err = () => setMeta("This browser can't play this file (it may be a format such as FLV or SWF).");
+  return (
+    <div className="media-player">
+      {isVideo ? (
+        <video src={src} controls autoPlay={autoPlay} preload="metadata" onLoadedMetadata={onMeta} onError={err} />
+      ) : (
+        <audio src={src} controls autoPlay={autoPlay} preload="metadata" onLoadedMetadata={onMeta} onError={err} />
+      )}
+      {meta && <div className="muted small">{meta}</div>}
+    </div>
+  );
+}
+
+/** Replace an asset, first pointing out if the new image doesn't match the old one. */
+async function replaceChecked(path: string, file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (isImageFile(path)) {
+    const old = imageInfoOf(store.project?.files[path]);
+    const next = imageInfo(bytes);
+    const issues = old ? replacementMismatches(old, next) : [];
+    if (issues.length && !confirm(`Replace ${basename(path)} with ${file.name}?\n\n• ${issues.join('\n\n• ')}`)) return;
+  }
+  await live.replaceAsset(path, file);
 }

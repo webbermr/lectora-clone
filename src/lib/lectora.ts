@@ -21,6 +21,7 @@ import { referencedAssets, textOf } from './assetRefs';
 import { removeResourcesAndFiles, type ManifestModel } from './manifest';
 import type { FileMap } from './package';
 import { basename, isHtmlFile, isTextFile } from './paths';
+import { editTestXml, type OpenedTests, type TestEdit } from './lectoraTest';
 import { encodeText } from './text';
 
 export const TRACKING_FILE = 'trivantis-pagetracking.js';
@@ -202,6 +203,9 @@ export interface ProgressTotalChange {
 
 export interface DeletePlan {
   pages: string[];
+  /** Edited test XML (plain text); encrypted into `edits` just before applying. */
+  testXml: Map<string, string>;
+  tests: TestEdit[];
   toc: TocChange[];
   progressTotals: ProgressTotalChange[];
   /** Flags only deleted pages set; the pages that check them now answer as if they'd been set. */
@@ -250,13 +254,13 @@ export function planDelete(
   files: FileMap,
   manifest: ManifestModel | null,
   pagesToDelete: string[],
-  opts: { allowTests?: boolean; keepFinishable?: boolean } = {},
+  opts: { allowTests?: boolean; keepFinishable?: boolean; tests?: OpenedTests | { error: string } | null } = {},
 ): DeletePlan {
   const keepFinishable = opts.keepFinishable ?? true;
   const course = readLectoraCourse(files, manifest);
   const pages = [...new Set(pagesToDelete)].filter((p) => files[p]);
   const del = new Set(pages);
-  const plan: DeletePlan = { pages, toc: [], progressTotals: [], satisfied: [], assets: [], rewires: [], edits: new Map(), trackingNodesRemoved: 0, warnings: [] };
+  const plan: DeletePlan = { pages, testXml: new Map(), tests: [], toc: [], progressTotals: [], satisfied: [], assets: [], rewires: [], edits: new Map(), trackingNodesRemoved: 0, warnings: [] };
 
   const protectedHit = pages.filter((p) => PROTECTED.test(basename(p)));
   if (protectedHit.length) {
@@ -264,12 +268,18 @@ export function planDelete(
     return plan;
   }
   const ids = course.tracking ? allIds(course.tracking.title) : new Map<number, boolean>();
-  const testPages = pages.filter((p) => ids.get(course.idOf.get(p) ?? -1));
-  if (testPages.length && !opts.allowTests) {
+  const tests = opts.tests && 'xml' in opts.tests ? opts.tests : null;
+  const testPagesHit = pages.filter((p) => ids.get(course.idOf.get(p) ?? -1));
+  if (testPagesHit.length && !tests && !opts.allowTests) {
+    const why = opts.tests && 'error' in opts.tests ? ` ${opts.tests.error}` : '';
     plan.blocked =
-      `${testPages.length} of these pages belong to the test. Test questions are also listed in the test's own ` +
-      'definition file (_tobj….txt), which this version does not update yet, so removing them could stop the test ' +
-      'from scoring or finishing. Leave the test pages out of this delete for now.';
+      `${testPagesHit.length} of these pages belong to the test. The test's question list (_tobj….txt) has to be updated ` +
+      `too, or the test could stop scoring or finishing, and it couldn't be read.${why} Leave the test pages out of this delete for now.`;
+    return plan;
+  }
+  const resultsHit = tests ? [...tests.xml.values()].flatMap((x) => [...x.matchAll(/<page[^>]*hasResults[^>]*>[\s\S]*?<name>([^<]*)<\/name>/g)].map((m) => basename(m[1]))).filter((n) => del.has(n) || pages.some((p) => basename(p) === n)) : [];
+  if (resultsHit.length) {
+    plan.blocked = `${resultsHit.join(', ')} is the test's results page; the test needs it to show and record the score.`;
     return plan;
   }
 
@@ -340,6 +350,25 @@ export function planDelete(
   plan.rewires = [...rewireCount.values()];
   if (unresolved.size) {
     plan.warnings.push(`${unresolved.size} link(s) have no page left to point to and were left as they are: ${[...unresolved].slice(0, 5).join('; ')}`);
+  }
+
+  // --- The test's question list -------------------------------------------------
+  if (tests) {
+    const deletedNames = new Set(names);
+    for (const [file, xml] of tests.xml) {
+      const { xml: out, edit } = editTestXml(file, xml, deletedNames, (page) => {
+        const t = target('', byName.get(basename(page)) ?? page);
+        return t ? basename(t) : undefined;
+      });
+      if (out === xml) continue;
+      plan.testXml.set(file, out);
+      plan.tests.push(edit);
+      if (edit.drawn.after < edit.drawn.before) {
+        plan.warnings.push(`The test will ask ${edit.drawn.after} questions per attempt instead of ${edit.drawn.before}. Its pass mark stays at the same percentage.`);
+      }
+    }
+  } else if (opts.tests && 'error' in opts.tests) {
+    plan.warnings.push(`The test couldn't be read, so it wasn't checked for references to these pages. ${opts.tests.error}`);
   }
 
   // --- Page tracking --------------------------------------------------------

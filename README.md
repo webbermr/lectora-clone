@@ -81,8 +81,12 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
     it forever. This doesn't depend on when the runtime loads saved values from the LMS. It's only done
     when every use of the flag can be answered; otherwise you get a warning. Shown in the review, and
     can be switched off
-- Test question pages can't be deleted yet: Lectora encrypts the test's definition file
-  (`_tobj….txt`), so its question list can't be updated safely
+- Test questions can be deleted too. Lectora encrypts the test's question list (`_tobj….txt`);
+  it's decrypted and re-encrypted with the package's own `enc.js` and `trivantis-titlemgr.js`
+  (no key is stored in this app), and checked to read back exactly before saving, so learners
+  still can't read the answers. Deleted questions leave the test, a section never draws more
+  random questions than it has left, emptied sections go, and the pass/fail/back pages are
+  pointed elsewhere if deleted. The test's results page can't be deleted
 - The course check runs straight after, and the whole delete is one undo step
 
 **Course check** (sidebar **Check** tab)
@@ -99,10 +103,14 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Double-click text to type over it, or edit it in the Properties panel (needed for SVG text)
 - Replace an image or media file in place (it keeps its file name, so nothing else changes)
 - With nothing selected, the right panel lists every image, video, audio and other file the page
-  uses, with thumbnails, sizes and dimensions. It includes files the page's script only names
+  uses, with thumbnails, sizes and dimensions. Audio and video have a ▶ Play button. Images show
+  **replacement specs** read from the file itself (real format, pixel size, aspect ratio,
+  transparency, and the size it's shown at on the page), with a Copy button; replacing with an image
+  of a different format, shape or transparency asks first. It includes files the page's script only names
   (audio played by an action, a popup not yet open), marks what's on screen, and lets you
   **Show** or **Replace** each one. Lectora's transparent spacer GIFs are left out
-- **Interact** mode lets you click through a single-page player to the screen you want
+- **Interact** mode lets you click through a single-page player to the screen you want.
+  Press **S** for Select & edit and **I** for Interact (ignored while typing in a text box)
 - If the same text appears in several places, you pick which ones change
 - Edit view spots pages that are mostly script and offers to switch to Live edit
 

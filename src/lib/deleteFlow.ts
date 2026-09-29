@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from 'react';
 import { checkCourse, type CheckResult } from './courseCheck';
 import { planChanges, planDelete, type DeletePlan } from './lectora';
+import { openTests } from './lectoraTest';
 import { store } from './store';
 import { yieldToPaint } from './task';
 
@@ -17,6 +18,8 @@ export interface DeleteFlow {
 }
 
 let state: DeleteFlow | null = null;
+/** The package's test files, decrypted for this delete (kept out of React state). */
+let opened: ReturnType<typeof openTests> = null;
 let version = 0;
 const listeners = new Set<() => void>();
 const set = (next: DeleteFlow | null) => {
@@ -31,7 +34,8 @@ export const deleteFlow = {
     await yieldToPaint();
     try {
       const p = store.project!;
-      set({ label, pages, keepFinishable, stage: 'review', plan: planDelete(p.files, p.manifest, pages, { keepFinishable }) });
+      opened = openTests(p.files);
+      set({ label, pages, keepFinishable, stage: 'review', plan: planDelete(p.files, p.manifest, pages, { keepFinishable, tests: opened }) });
     } catch (e) {
       console.error(e);
       set({ label, pages, keepFinishable, stage: 'error', error: (e as Error).message });
@@ -48,9 +52,18 @@ export const deleteFlow = {
     set({ ...state, stage: 'applying' });
     await yieldToPaint();
     try {
+      // Re-encrypt edited tests the way Lectora does, and prove they read back exactly.
+      if (plan.testXml.size) {
+        if (!opened || !('cipher' in opened)) throw new Error("The test couldn't be re-encrypted.");
+        for (const [file, xml] of plan.testXml) {
+          const sealed = opened.cipher.encrypt(xml);
+          if (opened.cipher.decrypt(sealed) !== xml) throw new Error(`Re-encrypting ${file} didn't round-trip; nothing was changed.`);
+          plan.edits.set(file, sealed);
+        }
+      }
       await store.write(label, planChanges(plan));
       const p = store.project!;
-      const check = checkCourse(p.files, p.manifest);
+      const check = checkCourse(p.files, p.manifest, openTests(p.files));
       const errors = check.issues.filter((i) => i.severity === 'error').length;
       store.setStatus(`${label}: ${plan.pages.length} pages removed · course check ${errors ? `found ${errors} problem(s)` : 'passed'}`);
       set({ label, pages, keepFinishable, stage: 'done', plan, check });
