@@ -226,3 +226,17 @@ mark { background: #ffe58a; color: inherit; }
 .chapters { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
 .chapters-head { display: flex; gap: 6px; align-items: baseline; cursor: pointer; padding: 2px 4px; }
 .chapters-note { margin: 2px 4px 6px; }
+
+/* ----- publish progress ----- */
+.modal.publish { width: min(520px, 100%); gap: 8px; }
+.steps { list-style: none; display: flex; gap: 6px; padding: 0; margin: 8px 0 4px; counter-reset: step; }
+.steps li { flex: 1; font-size: 12px; color: var(--muted); padding: 5px 8px; border-radius: 6px; background: var(--panel-2); counter-increment: step; }
+.steps li::before { content: counter(step) '. '; }
+.steps li.active { background: #dbe8f8; color: var(--ribbon); font-weight: 600; }
+.steps li.done { color: #1f8a4c; }
+.steps li.done::before { content: '✓ '; }
+.steps li.failed { background: #fbe3e0; color: var(--danger); }
+.bar { height: 10px; border-radius: 5px; background: var(--panel-2); overflow: hidden; border: 1px solid var(--line); }
+.bar-fill { height: 100%; background: var(--accent); transition: width 0.15s linear; }
+.publish-stats { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+.publish-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 1.4em; color: var(--muted); }

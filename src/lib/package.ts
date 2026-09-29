@@ -38,13 +38,39 @@ export async function readScormZip(data: ArrayBuffer | Uint8Array | Blob): Promi
   return files;
 }
 
-export async function writeScormZip(files: FileMap): Promise<Blob> {
+/**
+ * Formats that are already compressed. Deflating them again costs most of the
+ * export time (a course is mostly images and audio) and saves almost nothing,
+ * so they're stored as-is.
+ */
+const PRECOMPRESSED = /\.(png|jpe?g|gif|webp|avif|ico|mp3|m4a|aac|ogg|oga|opus|mp4|m4v|mov|webm|ogv|flv|swf|zip|gz|7z|rar|pdf|docx|xlsx|pptx|woff2?|eot)$/i;
+
+export function shouldCompress(path: string): boolean {
+  return !PRECOMPRESSED.test(path);
+}
+
+export interface ZipProgress {
+  /** 0–100 across the whole package. */
+  percent: number;
+  /** The file being written right now. */
+  currentFile: string | null;
+}
+
+export async function writeScormZip(
+  files: FileMap,
+  onProgress?: (p: ZipProgress) => void,
+  opts: { compressAll?: boolean } = {},
+): Promise<Blob> {
   const zip = new JSZip();
+  const add = (path: string, bytes: Uint8Array) =>
+    zip.file(path, bytes, {
+      compression: opts.compressAll || shouldCompress(path) ? 'DEFLATE' : 'STORE',
+      compressionOptions: { level: 6 },
+    });
   // Put the manifest first; some LMS importers only peek at the first entries.
-  zip.file('imsmanifest.xml', files['imsmanifest.xml']);
+  add('imsmanifest.xml', files['imsmanifest.xml']);
   for (const [path, bytes] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
-    if (path === 'imsmanifest.xml') continue;
-    zip.file(path, bytes);
+    if (path !== 'imsmanifest.xml') add(path, bytes);
   }
-  return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  return zip.generateAsync({ type: 'blob' }, (m) => onProgress?.({ percent: m.percent, currentFile: m.currentFile }));
 }

@@ -125,3 +125,29 @@ describe('paths', () => {
     expect(resolveFrom('content/intro.html', 'https://example.com/x')).toBeNull();
   });
 });
+
+describe('export compression', () => {
+  it('stores already-compressed media and deflates text, with progress', async () => {
+    const { shouldCompress } = await import('../src/lib/package');
+    expect(shouldCompress('images/a.PNG')).toBe(false);
+    expect(shouldCompress('media/n.mp3')).toBe(false);
+    expect(shouldCompress('a001_page.html')).toBe(true);
+    expect(shouldCompress('trivantis.js')).toBe(true);
+
+    const text = new TextEncoder().encode('<p>repeat</p>'.repeat(2000));
+    const media = new Uint8Array(5000).map((_, i) => (i * 7919) % 251);
+    const updates: number[] = [];
+    const blob = await writeScormZip(
+      { 'imsmanifest.xml': new TextEncoder().encode('<manifest/>'), 'page.html': text, 'images/pic.png': media },
+      (p) => updates.push(p.percent),
+    );
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(new Uint8Array(await blob.arrayBuffer()));
+    // Internal sizes: STORE keeps compressed == uncompressed; DEFLATE shrinks repetitive text.
+    const size = (n: string) => (zip.files[n] as unknown as { _data: { compressedSize: number; uncompressedSize: number } })._data;
+    expect(size('images/pic.png').compressedSize).toBe(size('images/pic.png').uncompressedSize);
+    expect(size('page.html').compressedSize).toBeLessThan(size('page.html').uncompressedSize / 10);
+    expect(Object.keys(zip.files)[0]).toBe('imsmanifest.xml');
+    expect(updates.at(-1)).toBe(100);
+  });
+});

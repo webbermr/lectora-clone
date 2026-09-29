@@ -5,6 +5,7 @@ import { LiveStage } from './components/LiveStage';
 import { MatchChooser } from './components/MatchChooser';
 import { PreviewStage } from './components/PreviewStage';
 import { PropertiesPanel } from './components/PropertiesPanel';
+import { PublishProgress } from './components/PublishProgress';
 import { Sidebar } from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
 import { Welcome } from './components/Welcome';
@@ -54,6 +55,7 @@ export function App() {
         </span>
       </footer>
       <MatchChooser />
+      <PublishProgress />
     </div>
   );
 }

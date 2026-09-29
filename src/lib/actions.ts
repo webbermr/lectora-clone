@@ -1,6 +1,7 @@
 /** User-level operations built on the store: import, export, pages, assets. */
 import * as mf from './manifest';
-import { readScormZip, writeScormZip, type FileMap } from './package';
+import { readScormZip, shouldCompress, writeScormZip, type FileMap } from './package';
+import { publish } from './publish';
 import { basename, extname, relative } from './paths';
 import { newId, store, type FileChange } from './store';
 import { SCORM_HELPER_JS, SCORM_HELPER_PATH, newPageHtml } from './templates';
@@ -107,12 +108,39 @@ export async function renameProjectFile(from: string, to: string) {
 }
 
 export async function exportPackage() {
+  if (publish.running()) return;
   const p = store.project!;
-  store.setStatus('Building SCORM package…');
-  const blob = await writeScormZip(p.files);
   const name = slug(p.manifest?.title ?? p.name) + '_scorm' + (p.manifest?.version === '2004' ? '2004' : '12') + '.zip';
-  download(blob, name);
-  store.setStatus(`Exported ${name} (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
+  const paths = Object.keys(p.files);
+  publish.start({
+    fileName: name,
+    filesTotal: paths.length,
+    bytesTotal: paths.reduce((n, f) => n + p.files[f].length, 0),
+    storedCount: paths.filter((f) => !shouldCompress(f)).length,
+  });
+  // Let the progress window paint before the CPU-heavy part starts.
+  await new Promise((r) => setTimeout(r, 50));
+  try {
+    publish.update({ stage: 'packaging' });
+    const seen = new Set<string>();
+    let lastPaint = 0;
+    const blob = await writeScormZip(p.files, ({ percent, currentFile }) => {
+      if (currentFile) seen.add(currentFile);
+      // JSZip reports thousands of times a second; ~10 repaints a second is plenty.
+      const now = performance.now();
+      if (now - lastPaint < 100 && percent < 100) return;
+      lastPaint = now;
+      publish.update({ percent, currentFile, filesDone: seen.size });
+    });
+    publish.update({ stage: 'saving', percent: 100, filesDone: paths.length, currentFile: null });
+    download(blob, name);
+    publish.update({ stage: 'done', finishedAt: Date.now(), zipSize: blob.size, blob });
+    store.setStatus(`Published ${name} (${(blob.size / 1024 / 1024).toFixed(1)} MB)`);
+  } catch (e) {
+    console.error(e);
+    publish.update({ stage: 'error', error: (e as Error).message || String(e) });
+    store.setStatus('Publishing failed: ' + (e as Error).message);
+  }
 }
 
 export function download(blob: Blob, name: string) {
