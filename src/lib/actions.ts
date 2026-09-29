@@ -1,19 +1,98 @@
 /** User-level operations built on the store: import, export, pages, assets. */
 import * as mf from './manifest';
 import { readScormZip, shouldCompress, writeScormZip, type FileMap } from './package';
-import { publish } from './publish';
+import { loadProject } from './storage';
+import { task, yieldToPaint } from './task';
 import { basename, extname, relative } from './paths';
 import { newId, store, type FileChange } from './store';
 import { SCORM_HELPER_JS, SCORM_HELPER_PATH, newPageHtml } from './templates';
 import { decodeText, encodeText } from './text';
 
+const IMPORT_STEPS = ['Read zip', 'Extract files', 'Set up preview', 'Save in browser'];
+
+function mb(n: number): string {
+  return n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function sizeOf(files: FileMap): number {
+  return Object.values(files).reduce((n, b) => n + b.length, 0);
+}
+
+/** Load a project into the editor, reporting the preview setup and first save as steps. */
+async function openWithProgress(id: string, name: string, files: FileMap, previewStep: number) {
+  task.step(previewStep, { current: 'Copying files to the preview server…' });
+  await store.open(id, name, files, (done, total, current) => task.progress({ done, total, current }));
+  if (previewStep + 1 < (task.get()?.steps.length ?? 0)) {
+    task.step(previewStep + 1, { current: `Saving ${mb(sizeOf(files))} so it's here next time you open the app…` });
+    await store.saveNow();
+    if (store.saveState === 'error') throw new Error(store.status || 'Could not save the project in this browser.');
+  }
+}
+
+function courseSummary(files: FileMap, started: number): { summary: string; details: string[] } {
+  const p = store.project!;
+  const m = p.manifest;
+  const count = Object.keys(files).length;
+  const details: string[] = [];
+  if (!m) details.push(`⚠ Manifest problem: ${p.manifestError}. You can still edit files from the Files tab.`);
+  else if (m.items.length === 1 && !m.items[0].children.length && 'trivantis.js' in files) {
+    details.push('Lectora course: chapters are rebuilt from page file names in the Title Explorer.');
+  }
+  const secs = ((Date.now() - started) / 1000).toFixed(1);
+  return {
+    summary: `${m ? `"${m.title}" · SCORM ${m.version} · ` : ''}${count.toLocaleString()} files · ${mb(sizeOf(files))} in ${secs}s`,
+    details,
+  };
+}
+
 export async function importPackage(file: Blob & { name?: string }) {
-  const files = await readScormZip(file);
-  await store.open(newId(), file.name ?? 'Imported course', files);
-  const m = store.project?.manifest;
-  store.setStatus(
-    m ? `Imported "${m.title}" (SCORM ${m.version}, ${Object.keys(files).length} files)` : `Imported with manifest problem: ${store.project?.manifestError}`,
-  );
+  if (task.running()) return;
+  const started = Date.now();
+  task.start('Importing SCORM package…', `${file.name ?? 'package.zip'} · ${mb(file.size)}`, IMPORT_STEPS, {
+    closeLabel: 'Start editing',
+    doneTitle: 'Imported',
+    failTitle: 'Import failed',
+  });
+  await yieldToPaint();
+  try {
+    task.step(0, { current: 'Reading the zip file and its table of contents…' });
+    const files = await readScormZip(file, (done, total, current) => {
+      if (done === 1) task.step(1);
+      task.progress({ done, total, current });
+    });
+    await openWithProgress(newId(), file.name ?? 'Imported course', files, 2);
+    const { summary, details } = courseSummary(files, started);
+    task.finish(summary, { details });
+    store.setStatus(`Imported ${summary}`);
+  } catch (e) {
+    console.error(e);
+    task.fail(e);
+  }
+}
+
+/** Reopen a project saved in this browser. */
+export async function openSavedProject(id: string, name: string) {
+  if (task.running()) return;
+  const started = Date.now();
+  task.start('Opening project…', name, ['Load from browser', 'Set up preview'], {
+    closeLabel: 'Start editing',
+    doneTitle: 'Opened',
+    failTitle: "Couldn't open the project",
+  });
+  await yieldToPaint();
+  try {
+    task.step(0, { current: 'Reading the saved project…' });
+    const stored = await loadProject(id);
+    if (!stored) throw new Error('This project is missing from browser storage. It may have been cleared.');
+    await openWithProgress(stored.id, stored.name, stored.files, 1);
+    const { summary, details } = courseSummary(stored.files, started);
+    task.finish(summary, { details });
+    // Opening is usually quick; don't make people dismiss a window for it.
+    if (Date.now() - started < 1500) task.close();
+  } catch (e) {
+    console.error(e);
+    task.fail(e);
+  }
 }
 
 export async function newCourse(title: string, version: mf.ScormVersion) {
@@ -108,37 +187,37 @@ export async function renameProjectFile(from: string, to: string) {
 }
 
 export async function exportPackage() {
-  if (publish.running()) return;
+  if (task.running()) return;
   const p = store.project!;
   const name = slug(p.manifest?.title ?? p.name) + '_scorm' + (p.manifest?.version === '2004' ? '2004' : '12') + '.zip';
   const paths = Object.keys(p.files);
-  publish.start({
-    fileName: name,
-    filesTotal: paths.length,
-    bytesTotal: paths.reduce((n, f) => n + p.files[f].length, 0),
-    storedCount: paths.filter((f) => !shouldCompress(f)).length,
+  const stored = paths.filter((f) => !shouldCompress(f)).length;
+  const started = Date.now();
+  task.start('Publishing SCORM package…', name, ['Gather files', 'Build zip', 'Save download'], {
+    doneTitle: 'Published',
+    failTitle: 'Publishing failed',
+    note: `${stored.toLocaleString()} images, audio and video files are copied as-is, since they're already compressed; only text files (HTML, JS, CSS, XML) are compressed.`,
+    current: `Gathering ${paths.length.toLocaleString()} files (${mb(sizeOf(p.files))})…`,
   });
   // Let the progress window paint before the CPU-heavy part starts.
-  await new Promise((r) => setTimeout(r, 50));
+  await yieldToPaint();
   try {
-    publish.update({ stage: 'packaging' });
+    task.step(1, { total: paths.length });
     const seen = new Set<string>();
-    let lastPaint = 0;
     const blob = await writeScormZip(p.files, ({ percent, currentFile }) => {
       if (currentFile) seen.add(currentFile);
-      // JSZip reports thousands of times a second; ~10 repaints a second is plenty.
-      const now = performance.now();
-      if (now - lastPaint < 100 && percent < 100) return;
-      lastPaint = now;
-      publish.update({ percent, currentFile, filesDone: seen.size });
+      task.progress({ percent, done: seen.size, total: paths.length, current: currentFile ? `Adding ${currentFile}` : null });
     });
-    publish.update({ stage: 'saving', percent: 100, filesDone: paths.length, currentFile: null });
+    task.step(2, { current: 'Handing the file to your browser…' });
     download(blob, name);
-    publish.update({ stage: 'done', finishedAt: Date.now(), zipSize: blob.size, blob });
-    store.setStatus(`Published ${name} (${(blob.size / 1024 / 1024).toFixed(1)} MB)`);
+    const secs = ((Date.now() - started) / 1000).toFixed(1);
+    task.finish(`${mb(blob.size)} zip · ${paths.length.toLocaleString()} files in ${secs}s`, {
+      action: { label: 'Download again', run: () => download(blob, name) },
+    });
+    store.setStatus(`Published ${name} (${mb(blob.size)})`);
   } catch (e) {
     console.error(e);
-    publish.update({ stage: 'error', error: (e as Error).message || String(e) });
+    task.fail(e);
     store.setStatus('Publishing failed: ' + (e as Error).message);
   }
 }

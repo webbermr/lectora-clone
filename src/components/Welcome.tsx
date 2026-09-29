@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as actions from '../lib/actions';
-import { deleteProject, listProjects, loadProject, type ProjectSummary } from '../lib/storage';
-import { store } from '../lib/store';
+import { deleteProject, listProjects, type ProjectSummary } from '../lib/storage';
 
 export function Welcome() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -28,7 +27,7 @@ export function Welcome() {
     }
   };
 
-  const importFile = (f: File) => run(`Importing ${f.name}…`, () => actions.importPackage(f));
+  const importFile = (f: File) => actions.importPackage(f);
 
   return (
     <div
@@ -90,13 +89,7 @@ export function Welcome() {
                 <li key={p.id}>
                   <button
                     className="recent-open"
-                    onClick={() =>
-                      run(`Opening ${p.name}…`, async () => {
-                        const stored = await loadProject(p.id);
-                        if (!stored) throw new Error('Project data is missing.');
-                        await store.open(stored.id, stored.name, stored.files);
-                      })
-                    }
+                    onClick={() => void actions.openSavedProject(p.id, p.name)}
                   >
                     <b>{p.name}</b>
                     <span className="muted small">

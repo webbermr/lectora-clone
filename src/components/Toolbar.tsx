@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import * as actions from '../lib/actions';
 import { editor, useEditor } from '../lib/editor';
-import { usePublish } from '../lib/publish';
+import { useTask } from '../lib/task';
 import { store, useStore, type View } from '../lib/store';
 import type { InsertKind } from '../lib/templates';
 import { STAGE_WIDTHS } from './EditStage';
@@ -9,7 +9,7 @@ import { STAGE_WIDTHS } from './EditStage';
 export function Toolbar({ width, setWidth }: { width: string; setWidth: (w: string) => void }) {
   const s = useStore();
   const ed = useEditor();
-  const pub = usePublish();
+  const job = useTask();
   const media = useRef<HTMLInputElement>(null);
   const pendingKind = useRef<InsertKind>('image');
   const canInsert = s.view === 'edit' && !!ed.doc;
@@ -31,7 +31,7 @@ export function Toolbar({ width, setWidth }: { width: string; setWidth: (w: stri
     <header className="ribbon">
       <div className="ribbon-group">
         <button onClick={() => void store.saveNow().then(() => store.close())} title="Back to the project list">☰ Projects</button>
-        <button className="primary" disabled={!!pub && pub.stage !== 'done' && pub.stage !== 'error'} onClick={() => void actions.exportPackage()} title="Download as a SCORM .zip for your LMS">⤓ Publish SCORM</button>
+        <button className="primary" disabled={job?.status === 'running'} onClick={() => void actions.exportPackage()} title="Download as a SCORM .zip for your LMS">⤓ Publish SCORM</button>
       </div>
       <div className="ribbon-group">
         <button onClick={() => void store.undo()} disabled={!s.undoStack.length} title={s.undoStack.length ? `Undo ${s.undoStack.at(-1)!.label} (Ctrl+Z)` : 'Undo'}>↶</button>

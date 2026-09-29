@@ -66,8 +66,8 @@ class Store {
     this.emit();
   }
 
-  async open(id: string, name: string, files: FileMap) {
-    await mountProject(id, files);
+  async open(id: string, name: string, files: FileMap, onProgress?: (done: number, total: number, current: string) => void) {
+    await mountProject(id, files, onProgress);
     previewLms.reset();
     this.project = { id, name, files, manifest: null };
     this.reparseManifest();
@@ -200,6 +200,7 @@ class Store {
   }
 
   async saveNow() {
+    clearTimeout(this.saveTimer);
     const p = this.project;
     if (!p) return;
     this.saveState = 'saving';

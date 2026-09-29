@@ -27,6 +27,9 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 
 **Import**
 - SCORM 1.2 and SCORM 2004 (2nd–4th edition) packages
+- A progress window walks through reading the zip, extracting files, setting up the preview and
+  saving in the browser, with file counts, the current file and time left. Problems (such as a
+  zip with no `imsmanifest.xml`) are shown there. Reopening a saved project shows the same window
 - Handles zips made from the parent folder, `xml:base`, item `parameters`, non-UTF-8 pages
 
 **Title Explorer**
@@ -87,8 +90,8 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Images, audio, video, PDFs and fonts are stored as-is (they're already compressed); only text
   files are deflated. On a 240 MB course-sized package this cut export from ~18s to ~3s with
   the same zip size
-- A progress window shows each step, files done, the file being added, elapsed time and an
-  estimate of time left, then a summary with a **Download again** button
+- A progress window (the same one used for import) shows each step, files done, the file being
+  added, elapsed time and an estimate of time left, then a summary with a **Download again** button
 
 Projects autosave to IndexedDB, with full undo/redo for every change.
 

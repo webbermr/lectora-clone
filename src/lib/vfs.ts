@@ -48,12 +48,28 @@ export async function clearProject(projectId: string): Promise<void> {
   await Promise.all((await cache.keys()).filter((r) => r.url.startsWith(prefix)).map((r) => cache.delete(r)));
 }
 
-export async function mountProject(projectId: string, files: FileMap): Promise<void> {
+export async function mountProject(
+  projectId: string,
+  files: FileMap,
+  onProgress?: (done: number, total: number, current: string) => void,
+): Promise<void> {
   await ensureServiceWorker();
   // One project mounted at a time keeps the cache from growing without bound.
   const cache = await caches.open(CACHE);
   await Promise.all((await cache.keys()).map((r) => cache.delete(r)));
-  await Promise.all(Object.entries(files).map(([p, b]) => cache.put(vfsUrl(projectId, p), toResponse(p, b))));
+  const entries = Object.entries(files);
+  let done = 0;
+  let next = 0;
+  // A few writes in flight at a time: all-at-once finishes no sooner, and its
+  // completions arrive in one burst at the end, so progress would sit at 0%.
+  const worker = async () => {
+    while (next < entries.length) {
+      const [p, b] = entries[next++];
+      await cache.put(vfsUrl(projectId, p), toResponse(p, b));
+      onProgress?.(++done, entries.length, p);
+    }
+  };
+  await Promise.all(Array.from({ length: 16 }, worker));
 }
 
 /** Sibling path for the scripts-disabled copy of a page shown in the editor. */
