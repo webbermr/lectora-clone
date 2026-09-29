@@ -21,7 +21,7 @@ import { referencedAssets, textOf } from './assetRefs';
 import { removeResourcesAndFiles, type ManifestModel } from './manifest';
 import type { FileMap } from './package';
 import { basename, isHtmlFile, isTextFile } from './paths';
-import { editTestXml, type OpenedTests, type TestEdit } from './lectoraTest';
+import { editTestXml, testPages, type OpenedTests, type TestEdit } from './lectoraTest';
 import { encodeText } from './text';
 
 export const TRACKING_FILE = 'trivantis-pagetracking.js';
@@ -212,6 +212,11 @@ export interface DeletePlan {
   /** Edited test XML (plain text); encrypted into `edits` just before applying. */
   testXml: Map<string, string>;
   tests: TestEdit[];
+  /**
+   * Tests deleted whole (every page, results page included). Their question file is left as it is:
+   * the launch page still loads it at start, and nothing can open the test any more.
+   */
+  testsRemoved: { file: string; pages: number }[];
   toc: TocChange[];
   progressTotals: ProgressTotalChange[];
   /** Flags only deleted pages set; the pages that check them now answer as if they'd been set. */
@@ -266,7 +271,7 @@ export function planDelete(
   const course = readLectoraCourse(files, manifest);
   const pages = [...new Set(pagesToDelete)].filter((p) => files[p]);
   const del = new Set(pages);
-  const plan: DeletePlan = { pages, otherFiles: [], unresolved: [], hubs: [], testXml: new Map(), tests: [], toc: [], progressTotals: [], satisfied: [], assets: [], rewires: [], edits: new Map(), trackingNodesRemoved: 0, warnings: [] };
+  const plan: DeletePlan = { pages, otherFiles: [], unresolved: [], hubs: [], testXml: new Map(), tests: [], testsRemoved: [], toc: [], progressTotals: [], satisfied: [], assets: [], rewires: [], edits: new Map(), trackingNodesRemoved: 0, warnings: [] };
 
   const protectedHit = pages.filter((p) => PROTECTED.test(basename(p)));
   if (protectedHit.length) {
@@ -290,7 +295,15 @@ export function planDelete(
       `too, or the test could stop scoring or finishing, and it couldn't be read.${why} Leave the test pages out of this delete for now.`;
     return plan;
   }
-  const resultsHit = tests ? [...tests.xml.values()].flatMap((x) => [...x.matchAll(/<page[^>]*hasResults[^>]*>[\s\S]*?<name>([^<]*)<\/name>/g)].map((m) => basename(m[1]))).filter((n) => del.has(n) || pages.some((p) => basename(p) === n)) : [];
+  // Deleting every page of a test, results page included, removes the test as a whole.
+  const deletingNames = new Set(pages.map((p) => basename(p)));
+  const wholeTests = new Set(
+    tests ? [...tests.xml].filter(([, x]) => {
+      const listed = testPages(x).map((n) => basename(n));
+      return listed.length > 0 && listed.every((n) => deletingNames.has(n));
+    }).map(([f]) => f) : [],
+  );
+  const resultsHit = tests ? [...tests.xml].filter(([f]) => !wholeTests.has(f)).map(([, x]) => x).flatMap((x) => [...x.matchAll(/<page[^>]*hasResults[^>]*>[\s\S]*?<name>([^<]*)<\/name>/g)].map((m) => basename(m[1]))).filter((n) => del.has(n) || pages.some((p) => basename(p) === n)) : [];
   if (resultsHit.length) {
     plan.blocked = `${resultsHit.join(', ')} is the test's results page; the test needs it to show and record the score.`;
     return plan;
@@ -386,6 +399,10 @@ export function planDelete(
   if (tests) {
     const deletedNames = new Set(names);
     for (const [file, xml] of tests.xml) {
+      if (wholeTests.has(file)) {
+        plan.testsRemoved.push({ file, pages: testPages(xml).length });
+        continue;
+      }
       const { xml: out, edit } = editTestXml(file, xml, deletedNames, (page) => {
         const t = target('', byName.get(basename(page)) ?? page);
         return t ? basename(t) : undefined;

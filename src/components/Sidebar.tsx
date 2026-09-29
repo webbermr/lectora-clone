@@ -114,7 +114,9 @@ function TitleExplorer() {
       setMarked((prev) => {
         const next = new Set(prev);
         const under = (n: ItemNode) => flattenItems([n]).map((x) => x.identifier);
-        const covering = [...prev].filter((m) => m !== id && under(inferredById.get(m)!).includes(id));
+        // Ids can outlive their rows (after a delete or undo); skip those.
+        for (const m of prev) if (!inferredById.has(m)) next.delete(m);
+        const covering = [...next].filter((m) => m !== id && under(inferredById.get(m)!).includes(id));
         if (!prev.has(id) && !covering.length) {
           next.add(id);
           return next;

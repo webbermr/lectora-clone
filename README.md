@@ -83,6 +83,9 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
     it forever. This doesn't depend on when the runtime loads saved values from the LMS. It's only done
     when every use of the flag can be answered; otherwise you get a warning. Shown in the review, and
     can be switched off
+- Deleting every page of a test, results page included, removes the test as a whole. Its question list
+  is left as it is (the launch page loads it at start; nothing can open the test any more), and the
+  review reminds you to check completion by reaching the last page in Preview
 - Test questions can be deleted too. Lectora encrypts the test's question list (`_tobj….txt`);
   it's decrypted and re-encrypted with the package's own `enc.js` and `trivantis-titlemgr.js`
   (no key is stored in this app), and checked to read back exactly before saving, so learners
@@ -130,6 +133,13 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   with a rule in the page's own `<style id="lc-removed">` block rather than cut out of the code,
   because the page's scripts still show, hide and animate them by id. With nothing selected, the
   panel lists what's been removed on the page, with Restore buttons
+- **Move** objects: drag the selected object, nudge it with the arrow keys (Shift: 10px), or type an
+  exact X/Y in the Position panel. Lectora's page declares each object's position
+  (`new ObjText('text63337', null, 320, 9, …)` and `addIe8Attr(320, 9, …)`); those numbers are
+  rewritten, so the course places the object there itself. Objects repeated on many pages can be moved
+  on all of them (only where they sit at the same spot; a page that placed one elsewhere keeps its own)
+- Editing text that belongs to an object repeated across pages (a copyright line, a header) ticks
+  every page that has that object, so it changes everywhere by default
 - Ctrl/⌘+Z and Ctrl/⌘+Y (or Shift+Z) undo and redo in every view, including while the Live edit
   page has focus; text boxes keep their own undo
 - If the same text appears in several places, you pick which ones change
@@ -161,7 +171,9 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - A progress window (the same one used for import) shows each step, files done, the file being
   added, elapsed time and an estimate of time left, then a summary with a **Download again** button
 
-Projects autosave to IndexedDB, with full undo/redo for every change.
+Projects autosave to IndexedDB, with full undo/redo for every change. Refreshing the browser reopens
+the project, page and view you had open. If part of the editor fails, it shows the error with
+**Back to the editor** and **Copy details** instead of a blank page; the project stays open.
 
 ## Limitations
 
@@ -209,5 +221,6 @@ src/lib/live.ts       Live edit session (text write-back, asset replacement)
 src/lib/frameFollow.ts  Follows the page a Live edit / Preview frame has navigated to
 src/lib/removeObjects.ts  Hiding page objects by id (Live edit Remove / Restore)
 src/lib/pageIdentity.ts   Which page a running document shows (address, or Lectora objects)
+src/lib/moveObjects.ts    Reading and rewriting Lectora objects' declared positions
 src/components/       React UI (ribbon, explorer, stage, properties)
 ```

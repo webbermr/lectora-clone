@@ -143,6 +143,23 @@ export function DeleteDialog() {
                 </ul>
               </section>
             )}
+            {plan.testsRemoved.length > 0 && (
+              <section className="finishable">
+                <h4>📝 The whole test is removed</h4>
+                <ul className="plain-list small">
+                  {plan.testsRemoved.map((t) => (
+                    <li key={t.file}>
+                      All {t.pages} of its pages go, results page included. Its question list (<span className="mono">{t.file}</span>) is left as
+                      it is: the course loads it at start, and nothing can open the test any more.
+                    </li>
+                  ))}
+                  <li>
+                    If the course recorded completion or a score through the test, that stops. Reach the last page in Preview and check the
+                    LMS readout shows the course as completed.
+                  </li>
+                </ul>
+              </section>
+            )}
             {plan.tests.length > 0 && (
               <section className="finishable">
                 <h4>📝 Test updated (and re-encrypted)</h4>

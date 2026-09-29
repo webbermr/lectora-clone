@@ -12,6 +12,7 @@ import { Sidebar } from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
 import { Welcome } from './components/Welcome';
 import { useStore } from './lib/store';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export function App() {
   const s = useStore();
@@ -47,14 +48,20 @@ export function App() {
     <div className="app">
       <Toolbar width={width} setWidth={setWidth} />
       <div className="workspace">
-        <Sidebar />
+        <ErrorBoundary area="sidebar">
+          <Sidebar />
+        </ErrorBoundary>
         <main className="stage">
-          {s.view === 'edit' && <EditStage width={width} />}
-          {s.view === 'live' && <LiveStage width={width} />}
-          {s.view === 'preview' && <PreviewStage width={width} />}
-          {s.view === 'code' && <CodeView />}
+          <ErrorBoundary area={`${s.view} view`} key={s.view}>
+            {s.view === 'edit' && <EditStage width={width} />}
+            {s.view === 'live' && <LiveStage width={width} />}
+            {s.view === 'preview' && <PreviewStage width={width} />}
+            {s.view === 'code' && <CodeView />}
+          </ErrorBoundary>
         </main>
-        <PropertiesPanel />
+        <ErrorBoundary area="properties panel" key={s.currentPath ?? ''}>
+          <PropertiesPanel />
+        </ErrorBoundary>
       </div>
       <footer className="statusbar">
         <span className="status-msg" title={s.status}>{s.status}</span>
@@ -64,8 +71,10 @@ export function App() {
           {{ saved: '✓ Saved', saving: 'Saving…', dirty: 'Unsaved changes', error: '⚠ Save failed' }[s.saveState]}
         </span>
       </footer>
-      <MatchChooser />
-      <DeleteDialog />
+      <ErrorBoundary area="dialog">
+        <MatchChooser />
+        <DeleteDialog />
+      </ErrorBoundary>
       <ProgressWindow />
     </div>
   );

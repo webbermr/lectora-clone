@@ -306,3 +306,12 @@ kbd { font: 11px/1 ui-monospace, monospace; padding: 1px 4px; border: 1px solid 
 .removed-list { list-style: none; margin: 0; padding: 0 8px 6px; display: flex; flex-direction: column; gap: 4px; }
 .removed-list li { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .removed-list li > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A part of the editor that failed to draw (see ErrorBoundary) */
+.error-panel { margin: 16px; padding: 12px 14px; border: 1px solid #e3b4ab; background: #fbeeeb; border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
+.error-panel .btn-row { display: flex; gap: 8px; }
+.position-object .xy { display: flex; gap: 8px; }
+.position-object .xy label { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+.position-object .xy input { width: 72px; }
+.position-object .check-row { display: block; font-size: 12px; line-height: 1.4; }
+.position-object .check-row input { margin: 0 6px 0 0; vertical-align: -2px; }

@@ -127,7 +127,13 @@ export function checkCourse(files: FileMap, manifest: ManifestModel | null, test
   // --- Tests ---------------------------------------------------------------------------
   if (tests && 'xml' in tests) {
     for (const [file, xml] of tests.xml) {
-      const missing = testPages(xml).filter((p) => !files[p] && !Object.keys(files).some((f) => basename(f) === basename(p)));
+      const listed = testPages(xml);
+      const missing = listed.filter((p) => !files[p] && !Object.keys(files).some((f) => basename(f) === basename(p)));
+      if (listed.length && missing.length === listed.length) {
+        // Deleted as a whole: nothing links to it any more, and its file is left for the launch page to load.
+        add('info', 'Test', `The test's pages have all been removed, so the course no longer has a test. Its question list stays in the package for the launch page to load.`, file);
+        continue;
+      }
       if (missing.length) {
         add('error', 'Test', `The test lists ${missing.length} page(s) that aren't in the package (${missing.slice(0, 3).join(', ')}). It may stop or score wrongly when it reaches them.`, file);
       }

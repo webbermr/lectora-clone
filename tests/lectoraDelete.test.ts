@@ -294,6 +294,23 @@ describe('deleting test questions', () => {
     expect(planDelete(files, m, ['a001_test_test_results.html'], { tests }).blocked).toMatch(/results page/);
   });
 
+  it('deletes the whole test, results page included, leaving its question list untouched', async () => {
+    const { openTests, testPages } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const tests = openTests(files)!;
+    const m = parseManifest(text(files, 'imsmanifest.xml'));
+    const all = testPages((tests as { xml: Map<string, string> }).xml.get('_tobj700.txt')!);
+    const plan = planDelete(files, m, all, { tests });
+    expect(plan.blocked).toBeUndefined();
+    expect(plan.testsRemoved).toEqual([{ file: '_tobj700.txt', pages: all.length }]);
+    expect(plan.testXml.size).toBe(0);
+    const after = apply(files, planChanges(plan));
+    expect(after['_tobj700.txt']).toBe(files['_tobj700.txt']);
+    const r = checkCourse(after, parseManifest(text(after, 'imsmanifest.xml')), openTests(after));
+    expect(r.issues.filter((i) => i.severity === 'error')).toEqual([]);
+    expect(r.issues.some((i) => i.kind === 'Test' && /no longer has a test/.test(i.message))).toBe(true);
+  });
+
   it('course check catches a test that lists missing pages', async () => {
     const { openTests } = await import('../src/lib/lectoraTest');
     const files = await load();

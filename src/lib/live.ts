@@ -13,7 +13,8 @@ import { encodeText } from './text';
 import { referencedAssets, textOf } from './assetRefs';
 import { vfsUrl } from './vfs';
 import { documentPage } from './pageIdentity';
-import { REMOVED_STYLE_ID, hiddenIds, hiddenRules, removedCss, setHidden } from './removeObjects';
+import { REMOVED_STYLE_ID, declaredObjects, hiddenIds, hiddenRules, objectRoot, pagesWithObject, partIds, removedCss, setHidden } from './removeObjects';
+import { declaredPosition, declaredPositions, moveInSource, type Point } from './moveObjects';
 
 export type LiveMode = 'select' | 'interact';
 
@@ -71,7 +72,8 @@ class LiveSession {
    */
   pageOf(doc: Document): string | null {
     const files = store.project?.files;
-    const address = this.pathFromUrl(doc.location.href);
+    // A document the frame has navigated away from has no window or address any more.
+    const address = doc.location ? this.pathFromUrl(doc.location.href) : null;
     return (files && documentPage(doc, address, files)) || address;
   }
 
@@ -85,7 +87,7 @@ class LiveSession {
     if (doc) {
       const page = this.pageOf(doc);
       add(page);
-      add(this.pathFromUrl(doc.location.href));
+      if (doc.location) add(this.pathFromUrl(doc.location.href));
       for (const s of Array.from(doc.querySelectorAll('script[src]'))) {
         add(this.pathFromUrl((s as HTMLScriptElement).src));
       }
@@ -137,10 +139,14 @@ class LiveSession {
       }
       let chosen: SourceMatch[] | null = matches;
       if (matches.length > 1) {
-        // Default to every hit in the best file; the user confirms or adjusts.
+        // Text in an object the page shares with others (a copyright line, a header) is the same
+        // object on every page, so it changes everywhere. Otherwise default to the best file.
+        const shared = doc ? this.objectPages(c.node, doc) : [];
         const firstPath = matches[0].path;
-        const pre = new Set(matches.map((m, i) => (m.path === firstPath ? i : -1)).filter((i) => i >= 0));
-        chosen = await chooseMatches(`"${old.slice(0, 60)}" appears ${matches.length} times`, next, matches, pre);
+        const inScope = (m: SourceMatch) => (shared.length > 1 ? shared.includes(m.path) : m.path === firstPath);
+        const pre = new Set(matches.map((m, i) => (inScope(m) ? i : -1)).filter((i) => i >= 0));
+        const note = shared.length > 1 ? ` · ticked on the ${shared.length} pages that share this object` : '';
+        chosen = await chooseMatches(`"${old.slice(0, 60)}" appears ${matches.length} times${note}`, next, matches, pre);
         if (!chosen?.length) {
           failed.push(c);
           continue;
@@ -233,6 +239,96 @@ class LiveSession {
         } else if (use.via === 'background') {
           (el as HTMLElement).style.backgroundImage = `url("${bust(vfsUrl(store.project!.id, path))}")`;
         }
+      }
+    }
+  }
+
+  /** Pages that declare the Lectora object this node belongs to (just the one page for page-only objects). */
+  private objectPages(node: Node, doc: Document): string[] {
+    const files = store.project!.files;
+    const page = this.pageOf(doc);
+    const el = node.parentElement;
+    if (!page || !files[page] || !el) return [];
+    const root = objectRoot(el, declaredObjects(textOf(files[page])));
+    return root ? pagesWithObject(files, root.id) : [];
+  }
+
+  // ---- moving objects (see moveObjects.ts: the page's own declared position changes) ----
+
+  /** Move on this page only, or on every page that has the object at the same spot. */
+  moveScope: 'page' | 'all' = 'page';
+  setMoveScope(scope: 'page' | 'all') {
+    this.moveScope = scope;
+    this.emit();
+  }
+
+  /** The Lectora object the selection belongs to, with where its page declares it. */
+  selectedObject(el: Element | null = this.selected): { doc: Document; id: string; element: Element; at: Point } | null {
+    if (!el || !el.isConnected || !el.ownerDocument.defaultView) return null;
+    const doc = el.ownerDocument;
+    const files = store.project?.files;
+    const page = this.pageOf(doc);
+    if (!files || !page || !files[page]) return null;
+    const html = textOf(files[page]);
+    const root = objectRoot(el, declaredObjects(html));
+    const at = root ? declaredPosition(html, root.id) : null;
+    return root && at ? { doc, id: root.id, element: root.element, at } : null;
+  }
+
+  /** Arrow keys: move the selected object by a few pixels. */
+  async nudge(dx: number, dy: number): Promise<boolean> {
+    const o = this.selectedObject();
+    if (!o) return false;
+    await this.moveObject(o.doc, o.id, { x: o.at.x + dx, y: o.at.y + dy });
+    return true;
+  }
+
+  async moveObject(doc: Document, id: string, to: Point) {
+    const files = store.project!.files;
+    const page = this.pageOf(doc);
+    if (!page || !files[page]) return;
+    const from = declaredPosition(textOf(files[page]), id);
+    if (!from) return;
+    const pages = this.moveScope === 'all' ? pagesWithObject(files, id) : [page];
+    const writes: FileChange[] = [];
+    for (const p of pages) {
+      const html = textOf(files[p]);
+      const here = declaredPosition(html, id);
+      // Only where it sits at the same spot; a page that placed it elsewhere keeps its own layout.
+      if (!here || here.x !== from.x || here.y !== from.y) continue;
+      const next = moveInSource(html, id, to);
+      if (next !== html) writes.push({ path: p, bytes: encodeText(next) });
+    }
+    if (!writes.length) return;
+    await store.write(`Move ${id}`, writes, { fromStage: true });
+    this.syncMoved();
+    store.setStatus(`Moved ${id} to ${Math.round(to.x)}, ${Math.round(to.y)}${writes.length > 1 ? ` on ${writes.length} pages` : ''}. Undo with Ctrl+Z (⌘Z).`);
+    this.emit();
+  }
+
+  /** Where each object was declared when the running page built it. */
+  private builtAt = new WeakMap<Element, Point>();
+
+  /**
+   * Shift objects on the running page by how far their declared position has moved since the page
+   * built them (after a move, undo or redo), so there's no reload. Uses the CSS `translate` property,
+   * which adds to Lectora's own transforms (rotation) instead of replacing them.
+   */
+  syncMoved() {
+    const files = store.project?.files;
+    if (!files) return;
+    for (const doc of this.liveDocs()) {
+      const page = this.pageOf(doc);
+      if (!page || !files[page] || !isHtmlFile(page)) continue;
+      for (const [id, now] of declaredPositions(textOf(files[page]))) {
+        const el = doc.getElementById(id) as HTMLElement | null;
+        if (!el) continue;
+        let built = this.builtAt.get(el);
+        if (!built) this.builtAt.set(el, (built = now));
+        const dx = now.x - built.x;
+        const dy = now.y - built.y;
+        const value = dx || dy ? `${dx}px ${dy}px` : '';
+        for (const part of objectParts(doc, id, el)) if (part.style.translate !== value) part.style.translate = value;
       }
     }
   }
@@ -436,4 +532,15 @@ export function textNodesOf(el: Element, limit = 40): Text[] {
   });
   for (let n = walker.nextNode(); n && out.length < limit; n = walker.nextNode()) out.push(n as Text);
   return out;
+}
+
+/** An object's element plus any of its parts drawn outside it (Lectora's separate click-area SVGs). */
+export function objectParts(doc: Document, id: string, root: Element): (HTMLElement | SVGElement)[] {
+  const found = [root as HTMLElement];
+  for (const pid of partIds(id)) {
+    const e = pid === id ? null : (doc.getElementById(pid) as HTMLElement | null);
+    if (e && !found.includes(e)) found.push(e);
+  }
+  // Move each outermost piece once; a path inside a moved SVG moves with it.
+  return found.filter((e) => !found.some((o) => o !== e && o.contains(e)));
 }
