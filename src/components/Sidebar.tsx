@@ -1,10 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
 import * as actions from '../lib/actions';
 import { FindReplace } from './FindReplace';
-import type { ItemNode } from '../lib/manifest';
+import { flattenItems, type ItemNode } from '../lib/manifest';
 import { isHtmlFile, isImageFile, isMediaFile, isTextFile } from '../lib/paths';
 import { store, useStore } from '../lib/store';
-import { buildFileIndex, pageCount, type FileIndex } from '../lib/structure';
+import { buildFileIndex, inferLectoraStructure, isLectoraPackage, pageCount, type FileIndex } from '../lib/structure';
 import { vfsUrl } from '../lib/vfs';
 
 export function Sidebar() {
@@ -26,10 +26,12 @@ function TitleExplorer() {
   const m = s.project?.manifest;
   const [renaming, setRenaming] = useState<string | null>(null);
   const [openFiles, setOpenFiles] = useState<Set<string>>(() => new Set());
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [collapsed, setCollapsed] = useState<Map<string, boolean>>(() => new Map());
   const [showUnlisted, setShowUnlisted] = useState(false);
-  const files = s.project?.files;
-  const index = useMemo(() => (m && files ? buildFileIndex(m, Object.keys(files)) : null), [m, files]);
+  const [showChapters, setShowChapters] = useState(true);
+  const structure = useStructure();
+  const index = structure?.manifestIndex;
+  const lectora = structure?.lectora ?? null;
 
   if (!m || !index) {
     return (
@@ -48,24 +50,22 @@ function TitleExplorer() {
       else next.add(id);
       return next;
     });
-  const toggleCollapsed = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const setItemCollapsed = (id: string, closed: boolean) => setCollapsed((prev) => new Map(prev).set(id, closed));
+  // Recovered Lectora chapters aren't in the manifest, so manifest edits don't apply to them.
+  const editable = !!selected && !isInferred(selected);
   const addPage = () => {
     const title = prompt('Title for the new page:', 'New page');
-    if (title) void actions.addPage(title, selected ?? undefined);
+    if (title) void actions.addPage(title, editable ? selected! : undefined);
   };
   const del = () => {
-    if (!selected) return;
+    if (!editable) return;
     const alsoFile = confirm('Remove this page from the course.\n\nOK also deletes its HTML file from the package. Cancel keeps the file.');
     void actions.deleteItem(selected, alsoFile);
   };
 
-  const ctx: TreeCtx = { selected, renaming, setRenaming, index, openFiles, toggleFiles, collapsed, toggleCollapsed, currentPath: s.currentPath };
+  const ctx: TreeCtx = { selected, renaming, setRenaming, index, openFiles, toggleFiles, collapsed, setCollapsed: setItemCollapsed, currentPath: s.currentPath };
+  const lectoraCtx: TreeCtx | null = lectora ? { ...ctx, index: lectora.index, closedByDefault: true } : null;
+  const unlisted = lectora ? lectora.index.unlisted : index.unlisted;
 
   return (
     <div className="panel-body">
@@ -85,10 +85,10 @@ function TitleExplorer() {
       </div>
       <div className="mini-toolbar">
         <button onClick={addPage} title="Add a page after the selected one">＋ Page</button>
-        <button onClick={() => selected && setRenaming(selected)} disabled={!selected}>Rename</button>
-        <button onClick={() => selected && void actions.moveItem(selected, -1)} disabled={!selected} title="Move up">↑</button>
-        <button onClick={() => selected && void actions.moveItem(selected, 1)} disabled={!selected} title="Move down">↓</button>
-        <button onClick={del} disabled={!selected} title="Delete page">🗑</button>
+        <button onClick={() => editable && setRenaming(selected)} disabled={!editable}>Rename</button>
+        <button onClick={() => editable && void actions.moveItem(selected!, -1)} disabled={!editable} title="Move up">↑</button>
+        <button onClick={() => editable && void actions.moveItem(selected!, 1)} disabled={!editable} title="Move down">↓</button>
+        <button onClick={del} disabled={!editable} title="Delete page">🗑</button>
       </div>
       {m.items.length ? (
         <ul className="tree">
@@ -99,17 +99,43 @@ function TitleExplorer() {
       ) : (
         <p className="muted">No pages yet.</p>
       )}
-      {index.unlisted.length > 0 && (
-        <div className="unlisted">
-          <div className="tree-row" onClick={() => setShowUnlisted((v) => !v)} title="Files in the package that the manifest doesn't assign to any module or page">
-            <span className="tree-icon">{showUnlisted ? '▾' : '▸'}</span>
-            <span className="tree-label muted">Not in any module</span>
-            <span className="count">{index.unlisted.length}</span>
+      {lectora && lectoraCtx && (
+        <div className="chapters">
+          <div className="chapters-head" onClick={() => setShowChapters((v) => !v)}>
+            <span className="tree-icon">{showChapters ? '▾' : '▸'}</span>
+            <b>Chapters</b>
+            <span className="muted small">
+              {lectora.modules.length} chapters · {lectora.pageCount} pages
+            </span>
           </div>
-          {showUnlisted && <ItemFileList files={index.unlisted} depth={1} ctx={ctx} />}
+          <p className="hint chapters-note">
+            Recovered from Lectora's page file names, since the manifest lists this course as a single unit. Files
+            are matched to pages by what each page's HTML refers to.
+          </p>
+          {showChapters && (
+            <ul className="tree">
+              {lectora.modules.map((i) => (
+                <TreeItem key={i.identifier} item={i} depth={0} ctx={lectoraCtx} />
+              ))}
+            </ul>
+          )}
         </div>
       )}
-      {m.items.length === 1 && !m.items[0].children.length && (
+      {unlisted.length > 0 && (
+        <div className="unlisted">
+          <div
+            className="tree-row"
+            onClick={() => setShowUnlisted((v) => !v)}
+            title={lectora ? 'Files no page refers to: runtime files, or assets that may be unused' : "Files in the package that the manifest doesn't assign to any module or page"}
+          >
+            <span className="tree-icon">{showUnlisted ? '▾' : '▸'}</span>
+            <span className="tree-label muted">{lectora ? 'Not used by any page' : 'Not in any module'}</span>
+            <span className="count">{unlisted.length}</span>
+          </div>
+          {showUnlisted && <ItemFileList files={unlisted} depth={1} ctx={lectoraCtx ?? ctx} />}
+        </div>
+      )}
+      {!lectora && m.items.length === 1 && !m.items[0].children.length && (
         <p className="hint">
           The manifest describes this course as a single unit, so every file belongs to it. Lectora and Storyline
           often publish this way and keep their chapters and sections inside their own player, not in the manifest.
@@ -119,6 +145,29 @@ function TitleExplorer() {
   );
 }
 
+/**
+ * The course structure to show: the manifest's own modules when it has them,
+ * or, for a Lectora title published as one SCO, chapters recovered from the
+ * page file names.
+ */
+function useStructure() {
+  const s = useStore();
+  const m = s.project?.manifest ?? null;
+  const files = s.project?.files;
+  // Files are replaced (not mutated) on edit, but the map object is reused, so key on the undo history too.
+  const edits = s.undoStack.length + s.redoStack.length * 1000;
+  return useMemo(() => {
+    if (!m || !files) return null;
+    const manifestIndex = buildFileIndex(m, Object.keys(files));
+    const single = m.items.length === 1 && m.items[0].children.length === 0;
+    const xml = files['imsmanifest.xml'] ? new TextDecoder().decode(files['imsmanifest.xml'].subarray(0, 600)) : '';
+    const lectora = single && isLectoraPackage(xml, files) ? inferLectoraStructure(m, files) : null;
+    return { manifestIndex, lectora, modules: lectora ? lectora.modules : m.items.length > 1 ? m.items : [], index: lectora?.index ?? manifestIndex };
+  }, [m, files, edits]);
+}
+
+const isInferred = (id: string | null) => !!id && id.startsWith('lectora:');
+
 interface TreeCtx {
   selected: string | null;
   renaming: string | null;
@@ -126,9 +175,12 @@ interface TreeCtx {
   index: FileIndex;
   openFiles: Set<string>;
   toggleFiles: (id: string) => void;
-  collapsed: Set<string>;
-  toggleCollapsed: (id: string) => void;
+  /** Modules the user opened (false) or closed (true) by hand; others follow the default. */
+  collapsed: Map<string, boolean>;
+  setCollapsed: (id: string, closed: boolean) => void;
   currentPath: string | null;
+  /** Start modules closed (hundreds of recovered Lectora pages would otherwise flood the list). */
+  closedByDefault?: boolean;
 }
 
 /** A module/section (has children) or a page (has a launch file), with its files on demand. */
@@ -136,7 +188,12 @@ function TreeItem({ item, depth, ctx }: { item: ItemNode; depth: number; ctx: Tr
   const isModule = item.children.length > 0;
   const files = ctx.index.itemFiles.get(item.identifier) ?? [];
   const filesOpen = ctx.openFiles.has(item.identifier);
-  const isCollapsed = ctx.collapsed.has(item.identifier);
+  const holdsCurrent = useMemo(
+    () => isModule && !!ctx.currentPath && flattenItems(item.children).some((c) => c.href === ctx.currentPath),
+    [isModule, item, ctx.currentPath],
+  );
+  const closedByDefault = !!ctx.closedByDefault && !holdsCurrent;
+  const isCollapsed = ctx.collapsed.get(item.identifier) ?? closedByDefault;
   const pages = isModule ? pageCount(item) : 0;
 
   return (
@@ -145,7 +202,7 @@ function TreeItem({ item, depth, ctx }: { item: ItemNode; depth: number; ctx: Tr
         className={'tree-row' + (item.identifier === ctx.selected ? ' selected' : '') + (isModule ? ' module' : '')}
         style={{ paddingLeft: 4 + depth * 14 }}
         onClick={() => store.openPage(item.href ?? null, item.identifier)}
-        onDoubleClick={() => ctx.setRenaming(item.identifier)}
+        onDoubleClick={() => !isInferred(item.identifier) && ctx.setRenaming(item.identifier)}
         title={item.title + '\n' + (item.href ? item.href + item.query : `${pages} page${pages === 1 ? '' : 's'}`)}
       >
         {isModule ? (
@@ -154,7 +211,7 @@ function TreeItem({ item, depth, ctx }: { item: ItemNode; depth: number; ctx: Tr
             title={isCollapsed ? 'Expand' : 'Collapse'}
             onClick={(e) => {
               e.stopPropagation();
-              ctx.toggleCollapsed(item.identifier);
+              ctx.setCollapsed(item.identifier, !isCollapsed);
             }}
           >
             {isCollapsed ? '▸' : '▾'}
@@ -260,12 +317,12 @@ function FileList() {
   const [filter, setFilter] = useState('');
   const upload = useRef<HTMLInputElement>(null);
   const [moduleFilter, setModuleFilter] = useState('');
-  const m = s.project?.manifest;
   const fileMap = s.project?.files;
   const files = useMemo(() => Object.keys(fileMap ?? {}).sort(), [fileMap]);
-  const index = useMemo(() => (m ? buildFileIndex(m, files) : null), [m, files]);
-  // Only worth offering when the manifest actually splits the course up.
-  const modules = m && m.items.length > 1 ? m.items : [];
+  const structure = useStructure();
+  const index = structure?.index;
+  // Only worth offering when the course is actually split up.
+  const modules = structure?.modules ?? [];
   const inModule = (f: string) =>
     !moduleFilter ||
     (moduleFilter === '__none__' ? f !== 'imsmanifest.xml' && !index?.fileModules.has(f) : !!index?.fileModules.get(f)?.some((u) => u.identifier === moduleFilter));
@@ -289,11 +346,11 @@ function FileList() {
       </div>
       {modules.length > 0 && (
         <select className="module-filter" value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value)} title="Show only the files a module uses">
-          <option value="">All modules</option>
+          <option value="">{structure?.lectora ? 'All chapters' : 'All modules'}</option>
           {modules.map((mod) => (
             <option key={mod.identifier} value={mod.identifier}>{mod.title}</option>
           ))}
-          <option value="__none__">Not in any module</option>
+          <option value="__none__">{structure?.lectora ? 'Not used by any page' : 'Not in any module'}</option>
         </select>
       )}
       <ul className="file-list">

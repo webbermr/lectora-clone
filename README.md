@@ -36,6 +36,12 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   anything pulled in through `<dependency>`. Files used by several pages are tagged
   *shared*, and files no module claims are grouped under *Not in any module*
 - The Files tab can filter by module and tags each file with the module it belongs to
+- **Lectora titles published as one SCO** (the usual case) have a single item in the manifest.
+  For those, the Title Explorer also shows **Chapters** recovered from Lectora's page file
+  names (`a001_<chapter>_<page>.html`, listed in course order), with long runs such as test
+  modules shown as sections. Images and audio are matched to pages by scanning each page's
+  HTML, since Lectora lists every asset in one shared resource. Assets no page refers to are
+  grouped under *Not used by any page*
 - Add, rename (double-click), reorder and delete pages; rename the course
 - Files tab: every file in the package, with filter, upload, rename and delete
 
@@ -112,6 +118,8 @@ Layout:
 
 ```
 src/lib/manifest.ts   imsmanifest.xml parse + edit (keeps unknown XML intact)
+src/lib/structure.ts  which files belong to which module; Lectora chapter recovery
+src/lib/assetRefs.ts  assets a page's source refers to
 src/lib/package.ts    zip import/export
 src/lib/html.ts       scripts-disabled edit copy <-> saved HTML
 src/lib/vfs.ts        Cache Storage + public/sw.js serve project files to iframes
