@@ -46,7 +46,7 @@ export function Welcome() {
       }}
     >
       <div className="welcome-card">
-        <h1>Lectora Clone</h1>
+        <h1>SCORM Editor</h1>
         <p className="muted">Import a SCORM package, edit its pages, and publish it back to your LMS.</p>
 
         <div className="welcome-actions">
