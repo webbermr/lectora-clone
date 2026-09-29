@@ -131,6 +131,8 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Runs the course with scripts enabled against a built-in LMS
   (`window.API` for 1.2 and `window.API_1484_11` for 2004)
 - Prev/Next through the organization, live completion/score readout, SCORM call log, reset
+- Audio and video can be scrubbed: the preview server answers the byte-range requests players
+  use to seek
 - As you click through the course (in Preview or Live edit), the Title Explorer and Files tab
   highlight the page on screen and scroll to it. Switching views carries on from that page
 

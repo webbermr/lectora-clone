@@ -156,6 +156,8 @@ class Store {
 
   private async apply(changes: FileChange[], bumpRevision: boolean) {
     const p = this.project!;
+    // A new object each time, so views that memoise on the file map see the change.
+    p.files = { ...p.files };
     for (const c of changes) {
       if (c.bytes) {
         p.files[c.path] = c.bytes;
