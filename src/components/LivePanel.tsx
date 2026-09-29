@@ -1,6 +1,6 @@
-import { useMemo, useRef } from 'react';
-import { live, textNodesOf, useLive } from '../lib/live';
-import { isImageFile } from '../lib/paths';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { live, textNodesOf, useLive, type AssetKind, type PageAsset } from '../lib/live';
+import { basename, dirname, extname, isImageFile } from '../lib/paths';
 import { visibleText } from '../lib/sourceMatch';
 import { useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
@@ -9,24 +9,7 @@ import { vfsUrl } from '../lib/vfs';
 export function LivePanel() {
   const lv = useLive();
   const el = lv.selected;
-  if (!el || !el.isConnected) {
-    return (
-      <>
-        <p className="hint">
-          <b>Live edit</b> runs the page with its JavaScript, the way learners see it. Use it when the Edit view is
-          blank, which happens when an authoring tool (Lectora, Storyline, Captivate…) builds the page with scripts.
-        </p>
-        <p className="hint">
-          Click any text or image on the page. Its text shows up here along with the source file it lives in. Change
-          it and press Save, or double-click the text on the page to type straight over it.
-        </p>
-        <p className="hint">
-          To reach a later screen of a single-page player, switch to <b>Interact</b>, click through to it, then switch
-          back.
-        </p>
-      </>
-    );
-  }
+  if (!el || !el.isConnected) return <PageAssets />;
   return <Selected key={lv.getVersion()} el={el} />;
 }
 
@@ -74,7 +57,7 @@ function Selected({ el }: { el: Element }) {
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 e.target.value = '';
-                if (f) await live.replaceAsset(asset.path, f, el);
+                if (f) await live.replaceAsset(asset.path, f);
               }}
             />
             <p className="hint wide-cell">The new file keeps the old name, so every page that uses it picks it up.</p>
@@ -138,5 +121,132 @@ function TextPiece({ node }: { node: Text }) {
         </button>
       </div>
     </div>
+  );
+}
+
+const KIND_LABEL: Record<AssetKind, string> = { image: 'Images', video: 'Video', audio: 'Audio', other: 'Other files' };
+const KIND_ICON: Record<AssetKind, string> = { image: '🖼', video: '🎞', audio: '🔊', other: '📎' };
+const ACCEPT: Record<AssetKind, string> = { image: 'image/*', video: 'video/*', audio: 'audio/*', other: '' };
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Everything the page shown in Live edit uses, so assets can be found and replaced without hunting. */
+function PageAssets() {
+  const s = useStore();
+  const lv = useLive();
+  const [filter, setFilter] = useState<AssetKind | 'all'>('all');
+  const [, rescan] = useState(0);
+  // The page's runtime can add or swap objects at any time (timers, actions, slide changes).
+  useEffect(() => {
+    const t = setInterval(() => rescan((n) => n + 1), 1500);
+    return () => clearInterval(t);
+  }, []);
+  const pagePath = lv.stagePagePath() ?? s.currentPath;
+  // Re-read on every render; cheap, and the page's runtime may have added objects since.
+  const assets = live.pageAssets(pagePath);
+  const counts = assets.reduce((m, a) => ({ ...m, [a.kind]: (m[a.kind] ?? 0) + 1 }), {} as Partial<Record<AssetKind, number>>);
+  const shown = assets.filter((a) => filter === 'all' || a.kind === filter);
+  const kinds = (Object.keys(KIND_LABEL) as AssetKind[]).filter((k) => counts[k]);
+
+  return (
+    <>
+      <div className="props-head">
+        <b>Page assets</b>
+        <div className="mono muted small">{pagePath}</div>
+      </div>
+      <div className="chips">
+        <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All {assets.length}</button>
+        {kinds.map((k) => (
+          <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>
+            {KIND_ICON[k]} {counts[k]}
+          </button>
+        ))}
+        <button title="Scan the page again" onClick={() => rescan((n) => n + 1)}>⟳</button>
+      </div>
+      {assets.length === 0 && <p className="hint">No images, video or audio found on this page yet.</p>}
+      {(filter === 'all' ? kinds : [filter]).map((k) => {
+        const group = shown.filter((a) => a.kind === k);
+        if (!group.length) return null;
+        return (
+          <details key={k} className="section" open>
+            <summary>{KIND_LABEL[k]} ({group.length})</summary>
+            <ul className="asset-list">
+              {group.map((a) => (
+                <AssetRow key={a.path} asset={a} />
+              ))}
+            </ul>
+          </details>
+        );
+      })}
+      <p className="hint">
+        Click any text or image on the page to edit it. Assets marked <i>not on screen</i> are named in this page's
+        source but not showing right now, such as audio an action plays or a popup that hasn't opened.
+      </p>
+    </>
+  );
+}
+
+function AssetRow({ asset }: { asset: PageAsset }) {
+  const s = useStore();
+  const input = useRef<HTMLInputElement>(null);
+  const [dims, setDims] = useState('');
+  const src = vfsUrl(s.project!.id, asset.path) + '?v=' + (s.revisions[asset.path] ?? 0);
+  const onScreen = asset.elements.find((e) => e.isConnected);
+
+  useEffect(() => {
+    if (asset.kind !== 'image') return;
+    const img = new Image();
+    img.onload = () => setDims(img.naturalWidth && img.naturalHeight ? `${img.naturalWidth}×${img.naturalHeight}` : '');
+    img.src = src;
+  }, [src, asset.kind]);
+
+  return (
+    <li className="asset-row">
+      <div className="asset-thumb">
+        {asset.kind === 'image' ? <img src={src} alt="" loading="lazy" /> : <span>{KIND_ICON[asset.kind]}</span>}
+      </div>
+      <div className="asset-info">
+        <div className="asset-name" title={asset.path}>{basename(asset.path)}</div>
+        <div className="muted small asset-meta">
+          {[extname(asset.path).toUpperCase(), formatBytes(asset.bytes), dims, dirname(asset.path) && dirname(asset.path) + '/'].filter(Boolean).join(' · ')}
+        </div>
+        <div className="small">
+          {onScreen ? (
+            <span className="on-screen">● on screen{asset.elements.length > 1 ? ` ×${asset.elements.length}` : ''}</span>
+          ) : (
+            <span className="muted">○ not on screen</span>
+          )}
+        </div>
+      </div>
+      <div className="asset-actions">
+        {onScreen && (
+          <button
+            title="Select it on the page"
+            onClick={() => {
+              onScreen.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+              live.select(onScreen);
+            }}
+          >
+            Show
+          </button>
+        )}
+        <button title="Replace this file (keeps its name)" onClick={() => input.current?.click()}>Replace…</button>
+        <input
+          ref={input}
+          type="file"
+          hidden
+          accept={ACCEPT[asset.kind]}
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) await live.replaceAsset(asset.path, f);
+          }}
+        />
+      </div>
+    </li>
   );
 }

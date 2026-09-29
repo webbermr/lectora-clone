@@ -24,6 +24,8 @@ export interface ResourceModel {
   href?: string;
   scormType: string;
   files: string[];
+  /** Identifiers of resources this one depends on (shared scripts, media). */
+  dependencies: string[];
 }
 
 export interface ManifestModel {
@@ -104,6 +106,7 @@ function readResources(doc: Document): { list: ResourceModel[]; byId: Map<string
       href: href ? (resBase ? `${resBase}/${href}` : href) : undefined,
       scormType: scormTypeOf(res),
       files: kids(res, 'file').map((f) => join(resBase, f.getAttribute('href') ?? '')),
+      dependencies: kids(res, 'dependency').map((d) => d.getAttribute('identifierref') ?? '').filter(Boolean),
     });
   }
   return { list, byId: new Map(list.map((r) => [r.identifier, r])) };

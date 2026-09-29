@@ -6,7 +6,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { chooseMatches } from './dialog';
-import { isTextFile, resolveFrom } from './paths';
+import { isHtmlFile, isImageFile, isTextFile, normalize, resolveFrom } from './paths';
 import { applyToText, findEverywhere, visibleText, type SourceMatch } from './sourceMatch';
 import { store, type FileChange } from './store';
 import { decodeText, encodeText } from './text';
@@ -191,24 +191,173 @@ class LiveSession {
     return null;
   }
 
-  /** Overwrite an asset's bytes in place, keeping its name so no references change. */
-  async replaceAsset(path: string, file: File, el: Element) {
+  /**
+   * Overwrite an asset's bytes in place, keeping its name so no references
+   * change, then refresh every element on screen that shows it.
+   */
+  async replaceAsset(path: string, file: File) {
     await store.write(`Replace ${path}`, [{ path, bytes: new Uint8Array(await file.arrayBuffer()) }]);
-    // Bust the browser's image cache so the new file shows immediately.
-    const bust = (u: string) => u.split('#')[0] + (u.includes('?') ? '&' : '?') + 'lc=' + Date.now();
-    if (el instanceof HTMLImageElement) {
-      el.removeAttribute('srcset');
-      el.src = bust(el.currentSrc || el.src);
-    } else if (el instanceof HTMLMediaElement) {
-      el.src = bust(el.currentSrc || el.src);
-    } else if (el.tagName.toLowerCase() === 'image') {
-      el.setAttribute('href', bust(el.getAttribute('href') ?? ''));
-    } else if (el instanceof HTMLElement || el instanceof SVGElement) {
-      const url = vfsUrl(store.project!.id, path);
-      (el as HTMLElement).style.backgroundImage = `url("${bust(url)}")`;
-    }
-    store.setStatus(`Replaced ${path}${file.name.split('.').pop() !== path.split('.').pop() ? ' (kept the original file name so the page still finds it)' : ''}`);
+    this.refreshEverywhere(path);
+    const renamed = file.name.split('.').pop()?.toLowerCase() !== path.split('.').pop()?.toLowerCase();
+    store.setStatus(`Replaced ${path}${renamed ? ' (kept the original file name so the page still finds it)' : ''}`);
+    this.emit();
   }
+
+  /** Re-request an asset in every live document, bypassing the browser cache. */
+  private refreshEverywhere(path: string) {
+    const stamp = 'lc=' + Date.now();
+    const bust = (u: string) => u.split('#')[0].replace(/[?&]lc=\d+/, '') + (u.includes('?') ? '&' : '?') + stamp;
+    for (const doc of this.liveDocs()) {
+      for (const use of this.assetUses(doc)) {
+        if (use.path !== path) continue;
+        const el = use.element;
+        const tag = el.tagName.toLowerCase();
+        // Elements live in the page's own window, so check tag names, not instanceof.
+        if (tag === 'img') {
+          el.removeAttribute('srcset');
+          (el as HTMLImageElement).src = bust((el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src);
+        } else if (tag === 'video' || tag === 'audio') {
+          const m = el as HTMLMediaElement;
+          m.src = bust(m.currentSrc || m.src);
+        } else if (tag === 'source') {
+          const media = el.parentElement as HTMLMediaElement | null;
+          el.setAttribute('src', bust((el as HTMLSourceElement).src));
+          media?.load?.();
+        } else if (tag === 'image') {
+          el.setAttribute('href', bust(new URL(el.getAttribute('href') ?? el.getAttribute('xlink:href') ?? '', doc.baseURI).href));
+        } else if (use.via === 'background') {
+          (el as HTMLElement).style.backgroundImage = `url("${bust(vfsUrl(store.project!.id, path))}")`;
+        }
+      }
+    }
+  }
+
+  // ---- documents currently shown in the Live stage (the page plus any frames) ----
+
+  private docs = new Set<Document>();
+  private emitTimer: ReturnType<typeof setTimeout> | undefined;
+
+  register(doc: Document) {
+    this.docs.add(doc);
+    // Authoring runtimes keep building objects after load; refresh the asset list shortly after.
+    clearTimeout(this.emitTimer);
+    this.emitTimer = setTimeout(() => this.emit(), 600);
+  }
+
+  liveDocs(): Document[] {
+    for (const d of this.docs) if (!d.defaultView) this.docs.delete(d);
+    return [...this.docs];
+  }
+
+  /** Package path of the page showing in the stage (it changes as you click through in Interact mode). */
+  stagePagePath(): string | null {
+    const top = this.liveDocs().find((d) => d.defaultView?.frameElement?.classList.contains('stage-iframe'));
+    return top ? this.pathFromUrl(top.location.href) : null;
+  }
+
+  /** Every element in a document that displays a package file. */
+  assetUses(doc: Document): AssetUse[] {
+    const out: AssetUse[] = [];
+    const win = doc.defaultView;
+    const add = (element: Element, url: string | null | undefined, via: AssetUse['via']) => {
+      if (!url) return;
+      let abs: string;
+      try {
+        abs = new URL(url, doc.baseURI).href;
+      } catch {
+        return;
+      }
+      const path = this.pathFromUrl(abs);
+      if (path && !isHtmlFile(path) && !/\.(js|css|json|xml)$/i.test(path)) out.push({ path, element, via });
+    };
+    for (const el of Array.from(doc.querySelectorAll('img, image, video, audio, source, track, embed, object, iframe, frame, a[href], [poster]'))) {
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'img') add(el, (el as HTMLImageElement).currentSrc || el.getAttribute('src'), 'src');
+      else if (tag === 'image') add(el, el.getAttribute('href') ?? el.getAttribute('xlink:href'), 'src');
+      else if (tag === 'video' || tag === 'audio') add(el, (el as HTMLMediaElement).currentSrc || el.getAttribute('src'), 'src');
+      else if (tag === 'source' || tag === 'track' || tag === 'embed' || tag === 'iframe' || tag === 'frame') add(el, el.getAttribute('src'), 'src');
+      else if (tag === 'object') add(el, el.getAttribute('data'), 'src');
+      else if (tag === 'a') add(el, el.getAttribute('href'), 'link');
+      if (el.hasAttribute('poster')) add(el, el.getAttribute('poster'), 'src');
+    }
+    if (win) {
+      for (const el of Array.from(doc.querySelectorAll('body, body *'))) {
+        const bg = win.getComputedStyle(el).backgroundImage;
+        if (!bg || bg === 'none') continue;
+        for (const m of bg.matchAll(/url\(["']?([^"')]+)["']?\)/g)) add(el, m[1], 'background');
+      }
+    }
+    return out;
+  }
+
+  /**
+   * All assets a page uses: what is on screen now, plus files its source
+   * names that aren't showing yet (popups, audio played by an action, later
+   * states). Lectora builds many objects only when an action shows them.
+   */
+  pageAssets(pagePath: string | null): PageAsset[] {
+    const files = store.project?.files ?? {};
+    const byPath = new Map<string, PageAsset>();
+    const entry = (path: string) => {
+      let a = byPath.get(path);
+      if (!a) {
+        a = { path, kind: assetKind(path), bytes: files[path]?.length ?? 0, elements: [] };
+        byPath.set(path, a);
+      }
+      return a;
+    };
+    for (const doc of this.liveDocs()) {
+      for (const use of this.assetUses(doc)) {
+        if (!files[use.path]) continue;
+        const el = use.element.tagName.toLowerCase() === 'source' && use.element.parentElement ? use.element.parentElement : use.element;
+        const a = entry(use.path);
+        if (!a.elements.includes(el)) a.elements.push(el);
+      }
+    }
+    if (pagePath && files[pagePath]) {
+      const html = textOf(files[pagePath]);
+      for (const m of html.matchAll(ASSET_REF)) {
+        const ref = m[1].replace(/\\\//g, '/');
+        const path = [resolveFrom(pagePath, ref), normalize(ref)].find((p) => p && files[p]);
+        if (path && !isHtmlFile(path)) entry(path);
+      }
+    }
+    return [...byPath.values()]
+      .filter((a) => !isSpacer(a))
+      .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || Number(b.elements.length > 0) - Number(a.elements.length > 0) || a.path.localeCompare(b.path));
+  }
+}
+
+export interface AssetUse {
+  path: string;
+  element: Element;
+  via: 'src' | 'background' | 'link';
+}
+
+export type AssetKind = 'image' | 'video' | 'audio' | 'other';
+
+export interface PageAsset {
+  path: string;
+  kind: AssetKind;
+  bytes: number;
+  /** Elements showing it right now; empty when it is only named in the source. */
+  elements: Element[];
+}
+
+const KIND_ORDER: AssetKind[] = ['image', 'video', 'audio', 'other'];
+const ASSET_REF = /["'(=]\s*([^"'()\s<>]+?\.(?:png|jpe?g|gif|svg|webp|bmp|mp4|webm|ogv|m4v|mov|mp3|wav|ogg|oga|m4a|aac|flv|swf|pdf|docx?|xlsx?|pptx?|zip|vtt|srt))(?:[?#][^"')\s]*)?\s*["')]/gi;
+
+export function assetKind(path: string): AssetKind {
+  if (isImageFile(path)) return 'image';
+  if (/\.(mp4|webm|ogv|m4v|mov|flv)$/i.test(path)) return 'video';
+  if (/\.(mp3|wav|ogg|oga|m4a|aac)$/i.test(path)) return 'audio';
+  return 'other';
+}
+
+/** Lectora and older tools use transparent 1x1 GIFs for layout; they're noise here. */
+function isSpacer(a: PageAsset): boolean {
+  if (/(^|\/)(trans|spacer|blank|clear|pixel)\.gif$/i.test(a.path)) return true;
+  return a.kind === 'image' && a.bytes > 0 && a.bytes < 100 && /\.gif$/i.test(a.path);
 }
 
 export const live = new LiveSession();
