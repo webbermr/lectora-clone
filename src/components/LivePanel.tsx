@@ -6,7 +6,7 @@ import { visibleText } from '../lib/sourceMatch';
 import { store, useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
 import { textOf } from '../lib/assetRefs';
-import { declaredObjects, hiddenIds, navigatesAway, objectRoot, pagesWithObject } from '../lib/removeObjects';
+import { declaredObjects, hiddenIds, navigatesAway, objectIdOf, objectRoot, pagesWithObject, partIds } from '../lib/removeObjects';
 
 /** Properties for the element selected in Live edit. */
 export function LivePanel() {
@@ -101,8 +101,8 @@ const KIND_NAME: Record<string, string> = { ObjButton: 'button', ObjImage: 'shap
 function RemoveObject({ el }: { el: Element }) {
   const s = useStore();
   const doc = el.ownerDocument;
-  const page = live.pathFromUrl(doc.location.href);
   const files = s.project!.files;
+  const page = useMemo(() => live.pageOf(doc), [doc, files]); // eslint-disable-line react-hooks/exhaustive-deps
   const html = page && files[page] ? textOf(files[page]) : '';
   const declared = useMemo(() => declaredObjects(html), [html]);
   const root = useMemo(() => (page ? objectRoot(el, declared) : null), [el, declared, page]);
@@ -112,11 +112,12 @@ function RemoveObject({ el }: { el: Element }) {
   // Objects sitting on top of this one (a callout's text, an arrow's label) usually go with it.
   const covered = useMemo(() => {
     if (!root) return [];
-    const r = root.getBoundingClientRect();
+    const box = root.element.getBoundingClientRect();
+    const r = box.width && box.height ? box : el.getBoundingClientRect();
     if (!r.width || !r.height) return [];
     return [...declared.values()].filter((o) => {
       const e = doc.getElementById(o.id);
-      if (!e || e === root || root.contains(e) || e.contains(root)) return false;
+      if (!e || o.id === root.id || objectIdOf(o.id, declared) !== o.id || root.element.contains(e) || e.contains(root.element)) return false;
       const b = e.getBoundingClientRect();
       if (!b.width || !b.height || doc.defaultView?.getComputedStyle(e).display === 'none') return false;
       return b.left >= r.left - 2 && b.top >= r.top - 2 && b.right <= r.right + 2 && b.bottom <= r.bottom + 2;
@@ -146,8 +147,9 @@ function RemoveObject({ el }: { el: Element }) {
       const t = textOf(files[p]);
       byPage.set(p, ids.filter((id) => id === root.id || p === page || new RegExp(`'${id}'`).test(t)));
     }
+    const parts = new Map(ids.map((id) => [id, partIds(id, doc)]));
     live.select(null);
-    await live.removeObjects(`Remove ${label}`, byPage);
+    await live.removeObjects(`Remove ${label}`, byPage, parts);
   };
 
   return (
@@ -155,12 +157,12 @@ function RemoveObject({ el }: { el: Element }) {
       <summary>Remove from page</summary>
       <div className="stack">
         <p className="small">
-          {root === el ? 'This is' : 'Your selection is part of'} the {kind} <b>{label}</b> <span className="mono muted">({root.id})</span>.
+          {root.element === el ? 'This is' : 'Your selection is part of'} the {kind} <b>{label}</b> <span className="mono muted">({root.id})</span>.
         </p>
         {covered.length > 0 && (
           <label className="check-row">
             <input type="checkbox" checked={withCovered} onChange={(e) => setWithCovered(e.target.checked)} />
-            Also remove the {covered.length} object{covered.length === 1 ? '' : 's'} on top of it
+            Also remove the {covered.length} object{covered.length === 1 ? '' : 's'} in the same spot
             <span className="muted small"> ({covered.map((c) => c.name || c.id).join(', ')})</span>
           </label>
         )}

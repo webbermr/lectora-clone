@@ -12,7 +12,8 @@ import { store, type FileChange } from './store';
 import { encodeText } from './text';
 import { referencedAssets, textOf } from './assetRefs';
 import { vfsUrl } from './vfs';
-import { REMOVED_STYLE_ID, hiddenIds, removedCss, setHidden } from './removeObjects';
+import { documentPage } from './pageIdentity';
+import { REMOVED_STYLE_ID, hiddenIds, hiddenRules, removedCss, setHidden } from './removeObjects';
 
 export type LiveMode = 'select' | 'interact';
 
@@ -64,6 +65,16 @@ class LiveSession {
     }
   }
 
+  /**
+   * The package page a live document is showing. Lectora's page player keeps the address on the
+   * launch page while it swaps pages in, so this goes by the page's objects when it can.
+   */
+  pageOf(doc: Document): string | null {
+    const files = store.project?.files;
+    const address = this.pathFromUrl(doc.location.href);
+    return (files && documentPage(doc, address, files)) || address;
+  }
+
   /** Files most likely to hold this document's text, best first. */
   private priorityFiles(doc: Document | null): string[] {
     const files = store.project!.files;
@@ -72,8 +83,9 @@ class LiveSession {
       if (p && files[p] && isTextFile(p) && !order.includes(p) && !p.includes('__lc_edit__')) order.push(p);
     };
     if (doc) {
-      const page = this.pathFromUrl(doc.location.href);
+      const page = this.pageOf(doc);
       add(page);
+      add(this.pathFromUrl(doc.location.href));
       for (const s of Array.from(doc.querySelectorAll('script[src]'))) {
         add(this.pathFromUrl((s as HTMLScriptElement).src));
       }
@@ -228,12 +240,12 @@ class LiveSession {
   // ---- removing objects (see removeObjects.ts: they're hidden by id, so page scripts keep working) ----
 
   /** Hide objects on pages: page path → ids. One undo step. */
-  async removeObjects(label: string, byPage: Map<string, string[]>) {
+  async removeObjects(label: string, byPage: Map<string, string[]>, parts?: Map<string, string[]>) {
     const files = store.project!.files;
     const writes: FileChange[] = [];
     for (const [page, ids] of byPage) {
       const html = textOf(files[page]);
-      const next = setHidden(html, [...hiddenIds(html), ...ids]);
+      const next = setHidden(html, [...hiddenIds(html), ...ids], parts);
       if (next !== html) writes.push({ path: page, bytes: encodeText(next) });
     }
     await store.write(label, writes, { fromStage: true });
@@ -265,9 +277,10 @@ class LiveSession {
     const files = store.project?.files;
     if (!files) return;
     for (const doc of this.liveDocs()) {
-      const page = this.pathFromUrl(doc.location.href);
+      const page = this.pageOf(doc);
       if (!page || !files[page] || !isHtmlFile(page)) continue;
-      const css = removedCss(hiddenIds(textOf(files[page])));
+      const rules = hiddenRules(textOf(files[page]));
+      const css = removedCss([...rules.keys()], rules);
       // The page may have loaded with an older copy of the rules baked in; keep that one current too.
       const baked = doc.getElementById(REMOVED_STYLE_ID);
       if (baked && baked.textContent !== css) baked.textContent = css;
@@ -302,7 +315,7 @@ class LiveSession {
   /** Package path of the page showing in the stage (it changes as you click through in Interact mode). */
   stagePagePath(): string | null {
     const top = this.liveDocs().find((d) => d.defaultView?.frameElement?.classList.contains('stage-iframe'));
-    return top ? this.pathFromUrl(top.location.href) : null;
+    return top ? this.pageOf(top) : null;
   }
 
   /** Every element in a document that displays a package file. */

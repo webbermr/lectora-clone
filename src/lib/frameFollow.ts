@@ -5,6 +5,7 @@
 import { useEffect, type RefObject } from 'react';
 import { store } from './store';
 import { vfsUrl } from './vfs';
+import { documentPage } from './pageIdentity';
 
 /** Package path for a frame URL served from the project, or null if it isn't one. */
 export function pathFromFrameUrl(href: string, projectId: string): string | null {
@@ -20,20 +21,23 @@ export function pathFromFrameUrl(href: string, projectId: string): string | null
 
 export function useFollowFrame(frame: RefObject<HTMLIFrameElement | null>, projectId: string) {
   useEffect(() => {
-    let last = '';
     const check = () => {
       let href = '';
+      let doc: Document | null = null;
       try {
         href = frame.current?.contentWindow?.location.href ?? '';
+        doc = frame.current?.contentDocument ?? null;
       } catch {
         return; // navigated off-site
       }
-      if (!href || href === last || href === 'about:blank') return;
-      last = href;
-      const path = pathFromFrameUrl(href, projectId);
-      if (path && store.project?.files[path]) store.setViewing(path);
+      const files = store.project?.files;
+      if (!href || href === 'about:blank' || !doc || !files) return;
+      const address = pathFromFrameUrl(href, projectId);
+      // A page player (Lectora's pagePlayer) swaps pages in without changing the address.
+      const path = documentPage(doc, address, files);
+      if (path && files[path]) store.setViewing(path);
     };
-    const timer = setInterval(check, 400);
+    const timer = setInterval(check, 500);
     return () => clearInterval(timer);
   }, [frame, projectId]);
 }
