@@ -84,6 +84,11 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 
 **Publish**
 - Downloads a SCORM `.zip` with the manifest first. Files you didn't touch are byte-identical.
+- Images, audio, video, PDFs and fonts are stored as-is (they're already compressed); only text
+  files are deflated. On a 240 MB course-sized package this cut export from ~18s to ~3s with
+  the same zip size
+- A progress window shows each step, files done, the file being added, elapsed time and an
+  estimate of time left, then a summary with a **Download again** button
 
 Projects autosave to IndexedDB, with full undo/redo for every change.
 
