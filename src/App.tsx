@@ -5,7 +5,7 @@ import { LiveStage } from './components/LiveStage';
 import { MatchChooser } from './components/MatchChooser';
 import { PreviewStage } from './components/PreviewStage';
 import { PropertiesPanel } from './components/PropertiesPanel';
-import { PublishProgress } from './components/PublishProgress';
+import { ProgressWindow } from './components/ProgressWindow';
 import { Sidebar } from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
 import { Welcome } from './components/Welcome';
@@ -31,7 +31,14 @@ export function App() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [s.saveState]);
 
-  if (!s.project) return <Welcome />;
+  if (!s.project) {
+    return (
+      <>
+        <Welcome />
+        <ProgressWindow />
+      </>
+    );
+  }
 
   return (
     <div className="app">
@@ -55,7 +62,7 @@ export function App() {
         </span>
       </footer>
       <MatchChooser />
-      <PublishProgress />
+      <ProgressWindow />
     </div>
   );
 }

@@ -6,7 +6,10 @@ export type FileMap = Record<string, Uint8Array>;
 
 const JUNK = /(^|\/)(__MACOSX\/|\.DS_Store$|Thumbs\.db$)/;
 
-export async function readScormZip(data: ArrayBuffer | Uint8Array | Blob): Promise<FileMap> {
+export async function readScormZip(
+  data: ArrayBuffer | Uint8Array | Blob,
+  onProgress?: (done: number, total: number, current: string) => void,
+): Promise<FileMap> {
   const zip = await JSZip.loadAsync(data);
   const entries = Object.values(zip.files).filter((f) => !f.dir && !JUNK.test(f.name));
 
@@ -22,11 +25,12 @@ export async function readScormZip(data: ArrayBuffer | Uint8Array | Blob): Promi
   const prefix = manifests[0].slice(0, manifests[0].length - 'imsmanifest.xml'.length);
 
   const files: FileMap = {};
+  let done = 0;
   await Promise.all(
     entries.map(async (entry) => {
       const name = normalize(entry.name);
-      if (!name.startsWith(prefix)) return;
-      files[name.slice(prefix.length)] = await entry.async('uint8array');
+      if (name.startsWith(prefix)) files[name.slice(prefix.length)] = await entry.async('uint8array');
+      onProgress?.(++done, entries.length, name);
     }),
   );
   // Normalise manifest case (IMSManifest.xml → imsmanifest.xml).
