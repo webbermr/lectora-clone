@@ -178,8 +178,12 @@ function looksScriptBuilt(doc: Document): boolean {
   body?.querySelectorAll('script, style, noscript, template').forEach((n) => n.remove());
   const text = (body?.textContent ?? '').replace(/\s+/g, ' ').trim();
   const media = doc.body?.querySelectorAll('img, video, svg, canvas').length ?? 0;
-  const scriptChars = Array.from(doc.scripts).reduce((n, s) => n + (s.textContent?.length ?? 0) + (s.src ? 500 : 0), 0);
-  return scriptChars > 200 && (text.length < 40 || scriptChars > text.length * 5) && media < 3;
+  const scripts = Array.from(doc.scripts);
+  const inline = scripts.reduce((n, sc) => n + (sc.src ? 0 : sc.textContent?.length ?? 0), 0);
+  // Nearly empty body with scripts, or a body that is mostly one big inline script.
+  const empty = text.length < 40 && media < 2 && scripts.length > 0;
+  const mostlyScript = inline > 3000 && inline > text.length * 10;
+  return empty || mostlyScript;
 }
 
 export function describe(el: Element): string {

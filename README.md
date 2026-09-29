@@ -20,6 +20,7 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 
 - `coffee-basics-scorm12.zip`: three-page SCORM 1.2 course, zipped inside a parent folder
 - `workshop-safety-scorm2004.zip`: single-SCO SCORM 2004 course with `xml:base` and sequencing
+- `onboarding-modules-scorm2004.zip`: two modules with a nested section, shared assets and an unlisted file
 - `fire-safety-scripted-scorm12.zip`: pages drawn by JavaScript (text in JS strings and a data file), for trying Live edit
 
 ## What it does
@@ -29,7 +30,12 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Handles zips made from the parent folder, `xml:base`, item `parameters`, non-UTF-8 pages
 
 **Title Explorer**
-- Shows the manifest's organization as a page tree
+- Shows the manifest's organization as a tree of modules, sections and pages
+  (collapsible, with page counts)
+- Each module, section or page can list the files it uses: its resource's files plus
+  anything pulled in through `<dependency>`. Files used by several pages are tagged
+  *shared*, and files no module claims are grouped under *Not in any module*
+- The Files tab can filter by module and tags each file with the module it belongs to
 - Add, rename (double-click), reorder and delete pages; rename the course
 - Files tab: every file in the package, with filter, upload, rename and delete
 

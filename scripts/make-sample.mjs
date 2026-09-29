@@ -240,4 +240,74 @@ slideData.lines.forEach(function (l, i) { t(l, 130 + i * 40, 20); });
 `);
 writeFileSync('samples/fire-safety-scripted-scorm12.zip', await zip3.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
 
-console.log('Wrote samples/coffee-basics-scorm12.zip samples/workshop-safety-scorm2004.zip and samples/fire-safety-scripted-scorm12.zip');
+
+// SCORM 2004 course split into modules and sections in the manifest, with a
+// shared-assets resource and one file the manifest doesn't list.
+{
+  const api2004 = `var api = (function f(w){ for (var i=0;i<10&&w;i++){ if (w.API_1484_11) return w.API_1484_11; if (w.parent===w) break; w=w.parent; } return null; })(window);
+if (api) { api.Initialize(''); api.SetValue('cmi.completion_status','completed'); api.Commit(''); }
+window.addEventListener('pagehide', function(){ if (api) api.Terminate(''); });`;
+  const pg = (title, body, depth) => `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title}</title>
+<link rel="stylesheet" href="${'../'.repeat(depth)}common/style.css">
+<script src="${'../'.repeat(depth)}common/scorm.js"></script>
+</head><body><div class="page">
+<img class="logo" src="${'../'.repeat(depth)}images/logo.png" alt="Acme">
+<h1>${title}</h1>
+${body}
+</div></body></html>
+`;
+  const pages = [
+    { id: 'P1', file: 'm1/welcome.html', title: 'Welcome', extra: ['m1/team.png'], body: '<p>Welcome to Acme. This is your first week.</p><img src="team.png" alt="The team" width="200">' },
+    { id: 'P2', file: 'm1/values.html', title: 'Our Values', body: '<ul><li>Be kind</li><li>Ship often</li></ul>' },
+    { id: 'P3', file: 'm2/time-off/vacation.html', title: 'Vacation', body: '<p>You get 25 days of vacation a year.</p>' },
+    { id: 'P4', file: 'm2/time-off/sick.html', title: 'Sick Leave', body: '<p>Tell your manager before 9am.</p>' },
+    { id: 'P5', file: 'm2/conduct.html', title: 'Code of Conduct', body: '<p>Treat everyone with respect.</p>' },
+  ];
+  const item = (p) => `<item identifier="I_${p.id}" identifierref="R_${p.id}"><title>${p.title}</title></item>`;
+  const byId = Object.fromEntries(pages.map((p) => [p.id, p]));
+  const manifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="ONBOARDING" version="1"
+  xmlns="http://www.imsglobal.org/xsd/imscp_v1p1"
+  xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_v1p3"
+  xmlns:imsss="http://www.imsglobal.org/xsd/imsss">
+  <metadata><schema>ADL SCORM</schema><schemaversion>2004 4th Edition</schemaversion></metadata>
+  <organizations default="ORG">
+    <organization identifier="ORG">
+      <title>New Hire Onboarding</title>
+      <item identifier="MOD1"><title>Module 1: Getting Started</title>
+        ${item(byId.P1)}
+        ${item(byId.P2)}
+      </item>
+      <item identifier="MOD2"><title>Module 2: Policies</title>
+        <item identifier="SEC_TIMEOFF"><title>Time Off</title>
+          ${item(byId.P3)}
+          ${item(byId.P4)}
+        </item>
+        ${item(byId.P5)}
+      </item>
+    </organization>
+  </organizations>
+  <resources>
+${pages.map((p) => `    <resource identifier="R_${p.id}" type="webcontent" adlcp:scormType="sco" href="${p.file}">
+      <file href="${p.file}"/>${(p.extra ?? []).map((e) => `<file href="${e}"/>`).join('')}
+      <dependency identifierref="SHARED"/>
+    </resource>`).join('\n')}
+    <resource identifier="SHARED" type="webcontent" adlcp:scormType="asset">
+      <file href="common/style.css"/><file href="common/scorm.js"/><file href="images/logo.png"/>
+    </resource>
+  </resources>
+</manifest>
+`;
+  const z = new JSZip();
+  z.file('imsmanifest.xml', manifest);
+  z.file('common/style.css', 'body{font-family:Arial,sans-serif;background:#eef;margin:0}.page{width:860px;margin:20px auto;background:#fff;padding:30px;min-height:480px;position:relative}.logo{position:absolute;right:30px;top:30px;width:48px}h1{color:#235}');
+  z.file('common/scorm.js', api2004);
+  z.file('images/logo.png', png(35, 55, 90));
+  z.file('m1/team.png', png(90, 160, 90));
+  z.file('extras/notes.txt', 'Authoring notes that were never listed in the manifest.');
+  for (const p of pages) z.file(p.file, pg(p.title, p.body, p.file.split('/').length - 1));
+  writeFileSync('samples/onboarding-modules-scorm2004.zip', await z.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+}
+
+console.log('Wrote samples/coffee-basics-scorm12.zip samples/workshop-safety-scorm2004.zip, samples/fire-safety-scripted-scorm12.zip and samples/onboarding-modules-scorm2004.zip');
