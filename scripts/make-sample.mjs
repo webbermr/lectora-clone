@@ -336,7 +336,12 @@ function Variable(name, def) { this.name = name; this.def = def; }
 Variable.prototype.getValue = function () { var v = sessionStorage.getItem(this.name); return v === null ? this.def : v; };
 Variable.prototype.set = function (v) { sessionStorage.setItem(this.name, String(v)); };
 Variable.prototype.equals = function (v) { return this.getValue() == v; };
+Variable.prototype.add = function (n) { this.set(Number(this.getValue()) + Number(n)); };
+Variable.prototype.lessThan = function (v) { return Number(this.getValue()) < Number(v); };
+function ObjProgress(name, alt, x, y, w, h, vis, z, a, b, c, d, e, f, min, max) { this.name = name; this.min = min; this.max = max; }
 function trivExitPage(page) { location.href = page; }
+// Like Lectora's runtime, this names a debug window learners never open.
+function trivDebug() { window.open('trivantisdebug.html'); }
 `;
   const tracking = (tree, numPages) => `function PageTrackingObj() { this.numPages = 0; this.title = null; }
 PageTrackingObj.prototype.find = function (n, id) { if (n.id == id) return n; for (var i = 0; n.c && i < n.c.length; i++) { var m = this.find(n.c[i], id); if (m) return m; } return null; };
@@ -350,6 +355,8 @@ trivPageTracking.title=${tree};
 `;
   const tree = `{id:1,v:0,c:[{id:100,v:0},${modules.map((m) => `{id:${m.id},v:0,c:[${pages.filter((p) => p.module === m).map((p) => `{id:${p.id},v:0}`).join(',')}]}`).join(',')},{id:900,v:0}]}`;
   const numPages = pages.length;
+  const progressPages = pages.filter((p) => p.module);
+  const progressTotal = progressPages.length;
   const pageHtml = (p) => {
     const i = idx(p.file);
     const prev = pages[i - 1]?.file;
@@ -360,7 +367,16 @@ trivPageTracking.title=${tree};
       body = `<h1>Dashboard</h1>
 <ul>${modules.map((m) => `<li><a href="#" onclick="trivExitPage('a001_${m.slug}_welcome.html', true); return false;">${m.title}</a> <span id="st${m.id}"></span></li>`).join('')}</ul>
 <button id="final" onclick="action_final()">Final Assessment</button> <span id="lock"></span>
+<p>Course progress: <b id="pct"></b> · <a href="#" onclick="trivExitPage('a001_toc1.html', true); return false;">Table of contents</a> · <a href="resources/Safety%20Handbook.pdf">Handbook (PDF)</a></p>
 <script>
+Varprogress_track = new Variable( 'Varprogress_track', '0' )
+Vara_progress_total = new Variable( 'Vara_progress_total', '${progressTotal}' )
+progress1 = new ObjProgress('progress1','',57,355,322,22,0,22,1,29,'#0000ff','','#405d87','',1,${progressTotal},0,0,0,1,0,'div',0 )
+function showProgress() {
+  var pct = Varprogress_track.lessThan(Vara_progress_total.getValue()) ? Math.round(100 * Varprogress_track.getValue() / Vara_progress_total.getValue()) : 100;
+  document.getElementById('pct').textContent = pct + '%';
+}
+showProgress();
 ${modules.map((m) => `var VarModule${m.id}Done = new Variable('VarModule${m.id}Done', '0');`).join('\n')}
 function action_final() {
   if (${modules.map((m) => `VarModule${m.id}Done.equals('1')`).join(' && ')}) trivExitPage('a001_final_assessment_begin.html', true);
@@ -373,6 +389,10 @@ ${modules.map((m) => `document.getElementById('st${m.id}').textContent = VarModu
 <p>Sample text for ${p.title}.</p>
 <img src="${img}" alt="" width="120">
 <p><button onclick="trivPrevPage()">Back</button> <button onclick="trivNextPage()">Next</button></p>
+<script>
+var Varprogress_track = new Variable('Varprogress_track', '0');
+if (!sessionStorage.getItem('seen_${p.id}')) { sessionStorage.setItem('seen_${p.id}', '1'); Varprogress_track.add('1'); }
+</script>
 ${p.last ? `<script>var VarModule${p.module.id}Done = new Variable('VarModule${p.module.id}Done', '0'); VarModule${p.module.id}Done.set('1');</script>` : ''}`;
     }
     return `<!DOCTYPE html>
@@ -423,6 +443,12 @@ ${p.file === 'a001_student_dashboard.html' ? pages.filter((q) => q !== p).map((q
     <resource identifier="R_images" type="webcontent" adlcp:scormtype="asset">
 ${allImages.map((f) => `      <file href="${f}"/>`).join('\n')}
     </resource>
+    <resource identifier="F_1" type="webcontent" adlcp:scormtype="asset">
+      <file href="a001_toc1.html"/>
+    </resource>
+    <resource identifier="R_extern" type="webcontent" adlcp:scormtype="asset">
+      <file href="resources/Safety%20Handbook.pdf"/>
+    </resource>
     <resource identifier="S_BaseFiles" type="webcontent" adlcp:scormtype="asset">
       <file href="trivantis.js"/>
       <file href="trivantis-pagetracking.js"/>
@@ -431,8 +457,29 @@ ${allImages.map((f) => `      <file href="${f}"/>`).join('\n')}
   </resources>
 </manifest>
 `;
+  const esc = (t) => JSON.stringify(t.replace(/(^|_)(\w)/g, (_, a, b) => (a ? ' ' : '') + b.toUpperCase()));
+  const toc = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Table of Contents</title>
+<script src="trivantis.js"></script>
+<script>
+function insertEntry(f, e) { f.items.push(e); } function insertFolder(f, g) { f.items.push(g); return g; }
+function NewFolder(t, h) { return { t: t, h: h, items: [] }; } function NewLink(t, h) { return { t: t, h: h }; }
+  fT = NewFolder("<i>Table Of Contents</i>", "", null)
+  insertEntry(fT, NewLink("Student Dashboard", "a001_student_dashboard.html", "page", 100))
+${modules.map((m) => `  aux1 = insertFolder(fT, NewFolder(${JSON.stringify(m.title)}, "a001_${m.slug}_welcome.html", "chap", ${m.id}))
+${pages.filter((p) => p.module === m).map((p) => `  insertEntry(aux1, NewLink(${esc(p.title.replace(/ /g, '_'))}, "${p.file}", "page", ${p.id}))`).join('\n')}`).join('\n')}
+  aux1 = insertFolder(fT, NewFolder("Final Assessment", "a001_final_assessment_begin.html", "chap", 800))
+  insertEntry(aux1, NewLink("Begin Final Assessment", "a001_final_assessment_begin.html", "page", 900))
+document.write(fT.items.map(function (x) { return x.items ? '<h3><a href="' + x.h + '">' + x.t + '</a></h3>' + x.items.map(function (e) { return '<div><a href="' + e.h + '">' + e.t + '</a></div>'; }).join('') : '<div><a href="' + x.h + '">' + x.t + '</a></div>'; }).join(''));
+</script>
+</head><body style="font-family:Arial,sans-serif;padding:24px"></body>
+</html>
+`;
   const z = new JSZip();
   z.file('imsmanifest.xml', manifest);
+  z.file('a001_toc1.html', toc);
+  z.file('resources/Safety Handbook.pdf', '%PDF-1.4 placeholder');
   z.file('a001index.html', `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Player</title><script>location.replace('a001_student_dashboard.html');</script></head><body></body></html>`);
   z.file('trivantis.js', runtime);
   z.file('trivantis-pagetracking.js', tracking(tree, numPages));

@@ -68,6 +68,19 @@ function xmlBase(el: Element | undefined): string {
   return el.getAttributeNS(XML_NS, 'base') ?? el.getAttribute('xml:base') ?? '';
 }
 
+/**
+ * Manifests write file names as URLs ("My%20File.pdf") while the zip holds the real
+ * name ("My File.pdf"). Decode the path part; leave any query string alone.
+ */
+function decodeHref(href: string): string {
+  const { path, suffix } = splitQuery(href);
+  try {
+    return decodeURIComponent(path) + suffix;
+  } catch {
+    return href;
+  }
+}
+
 function scormTypeOf(res: Element): string {
   for (const attr of Array.from(res.attributes)) {
     if (attr.localName.toLowerCase() === 'scormtype') return attr.value;
@@ -103,9 +116,9 @@ function readResources(doc: Document): { list: ResourceModel[]; byId: Map<string
     const href = res.getAttribute('href') ?? undefined;
     list.push({
       identifier: res.getAttribute('identifier') ?? '',
-      href: href ? (resBase ? `${resBase}/${href}` : href) : undefined,
+      href: href ? (resBase ? `${resBase}/${decodeHref(href)}` : decodeHref(href)) : undefined,
       scormType: scormTypeOf(res),
-      files: kids(res, 'file').map((f) => join(resBase, f.getAttribute('href') ?? '')),
+      files: kids(res, 'file').map((f) => join(resBase, decodeHref(f.getAttribute('href') ?? ''))),
       dependencies: kids(res, 'dependency').map((d) => d.getAttribute('identifierref') ?? '').filter(Boolean),
     });
   }

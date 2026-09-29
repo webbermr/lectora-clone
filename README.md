@@ -70,18 +70,26 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   - Lectora's visit tracking (`trivantis-pagetracking.js`): deleted pages leave the tree so
     "visit every page" can still reach 100%, and `numPages` drops by the pages removed
   - the manifest: their `P_<id>` resources, every `<dependency>` on them, and removed files
+  - the table of contents (`a001_toc*.html`): deleted pages' entries are removed, chapters left
+    empty go too, and a chapter whose link pointed at a deleted page opens its first remaining page
+  - fixed progress totals: when pages add to a counter that's compared with a fixed total
+    (Lectora: `Varprogress_track` vs `Vara_progress_total = 379`), the total and any progress bar
+    sized to it drop by what the deleted pages contributed, so progress can still reach 100%
   - **keeping the course finishable**: if a deleted page was the only one setting a flag that other
     pages check (say, "module 3 done" before the final assessment unlocks), those checks are answered
     as if the deleted pages had run (`VarModule3Done.equals('1')` becomes `true`), so nothing waits on
     it forever. This doesn't depend on when the runtime loads saved values from the LMS. It's only done
     when every use of the flag can be answered; otherwise you get a warning. Shown in the review, and
     can be switched off
-- Test question pages can't be deleted yet: the test's own definition file isn't updated
+- Test question pages can't be deleted yet: Lectora encrypts the test's definition file
+  (`_tobj….txt`), so its question list can't be updated safely
 - The course check runs straight after, and the whole delete is one undo step
 
 **Course check** (sidebar **Check** tab)
 - Finds links to pages that aren't in the package, Next/Back buttons that loop or point at their own
-  page, visit tracking that lists missing pages, and manifest problems
+  page, visit tracking that lists missing pages, progress totals the pages can no longer reach, and
+  manifest problems. Lectora's own runtime files (trivantis*.js etc.) aren't treated as course pages
+- The Title Explorer uses the table of contents' page and chapter names when there is one
 
 **Live edit view** (for pages built by JavaScript)
 - Runs the page with its scripts, like a learner sees it, and lets you click text and images
