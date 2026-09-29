@@ -209,9 +209,46 @@ docker compose up -d --build        # or:
 docker build -t lectora-clone . && docker run -d -p 8080:8080 lectora-clone
 ```
 
-Then open http://localhost:8080. `docker build --build-arg RUN_TESTS=true …` also runs the unit tests
-during the build.
+Then open http://localhost:8080 on the same computer. `docker build --build-arg RUN_TESTS=true …` also
+runs the unit tests during the build. Port 8080 only listens on this computer; for anyone else, see below.
 
+### Let other people on your network use it
+
+Browsers only show course pages over HTTPS (or on `localhost`), so other computers connect through
+the HTTPS service in `docker-compose.yml`. It runs [Caddy](https://caddyserver.com), which makes its
+own certificate for your address. Each computer then trusts Caddy's root certificate once.
+
+1. **Find this computer's address on the network**, e.g. `192.168.1.50`: `ipconfig` on Windows
+   (IPv4 Address), `ipconfig getifaddr en0` on macOS, `hostname -I` on Linux. Ask IT to reserve it
+   (a DHCP reservation) so it doesn't change.
+2. **Start it with HTTPS:**
+   ```bash
+   SITE_ADDRESS=192.168.1.50 docker compose --profile https up -d --build
+   ```
+   On Windows PowerShell: `$env:SITE_ADDRESS="192.168.1.50"; docker compose --profile https up -d --build`.
+   Add `SITE_NAME=lectora.office.lan` too if your network has a name for this computer.
+3. **Allow it through the firewall:** inbound TCP 443 (and 80, which just redirects to HTTPS).
+   Windows: *Windows Defender Firewall → Advanced settings → Inbound Rules → New Rule → Port → TCP 443*.
+4. **Copy out the root certificate** (it stays the same across restarts, so this is once per setup):
+   ```bash
+   docker compose --profile https cp https:/data/caddy/pki/authorities/local/root.crt ./lectora-root.crt
+   ```
+5. **Trust it on each computer that uses the editor** (yours too, if you'll use the HTTPS address):
+   - Windows: double-click `lectora-root.crt` → *Install Certificate* → *Local Machine* → *Place all
+     certificates in the following store* → **Trusted Root Certification Authorities**. Restart the browser.
+     (Chrome and Edge use this; so does Firefox with `security.enterprise_roots.enabled`.)
+   - macOS: open it in *Keychain Access* → *System* keychain → double-click it → *Trust* → **Always Trust**.
+   - Many at once: IT can push it with Group Policy / MDM.
+6. **Open** `https://192.168.1.50` on that computer.
+
+Clicking through a browser's "not secure" warning is not enough: the page opens, but course pages
+can't be shown, and the editor says to install the certificate. Only trust this root on computers that
+use the editor; anyone holding Caddy's data volume could make certificates those computers accept.
+
+If your organisation already has certificates or an HTTPS proxy, use those instead of Caddy: point
+them at port 8080 of the `lectora-clone` container.
+
+- It works at the site root or under a path
 - **HTTPS is required** anywhere but `localhost`. Course pages are shown through a service worker,
   and browsers only allow those over HTTPS. Put the container behind your usual HTTPS reverse proxy
   or load balancer (nginx, Caddy, Traefik, IIS, a cloud load balancer). Opened over plain HTTP from

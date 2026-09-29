@@ -1,0 +1,16 @@
+# HTTPS for people on your network (docker compose --profile https).
+# Caddy issues the certificate from its own local certificate authority. Each computer that
+# uses the editor must trust that authority's root certificate once; see the README.
+#
+# SITE_ADDRESS: this computer's address on the network, e.g. 192.168.1.50 (or a hostname).
+# SITE_NAME (optional): another name for it, e.g. lectora.office.lan.
+{
+	local_certs
+	# Browsers send no server name when connecting by IP address; use this certificate then.
+	default_sni {$SITE_ADDRESS:localhost}
+}
+
+{$SITE_ADDRESS:localhost}, {$SITE_NAME:localhost} {
+	encode gzip
+	reverse_proxy lectora-clone:8080
+}
