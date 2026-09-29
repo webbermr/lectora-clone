@@ -6,7 +6,8 @@ import { visibleText } from '../lib/sourceMatch';
 import { store, useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
 import { textOf } from '../lib/assetRefs';
-import { declaredObjects, hiddenIds, navigatesAway, objectIdOf, objectRoot, pagesWithObject, partIds } from '../lib/removeObjects';
+import { declaredObjects, hiddenIds, navigatesAway, objectIdOf, objectRoot, partIds } from '../lib/removeObjects';
+import { sameObjectEverywhere } from '../lib/objectTwins';
 
 /** Properties for the element selected in Live edit. */
 export function LivePanel() {
@@ -108,9 +109,11 @@ function RemoveObject({ el }: { el: Element }) {
   const html = page && files[page] ? textOf(files[page]) : '';
   const declared = useMemo(() => declaredObjects(html), [html]);
   const root = useMemo(() => (page ? objectRoot(el, declared) : null), [el, declared, page]);
-  const [scope, setScope] = useState<'page' | 'all'>('page');
+  const [scope, setScope] = useState<'page' | 'all'>('all');
   const [withCovered, setWithCovered] = useState(true);
-  const pages = useMemo(() => (root ? pagesWithObject(files, root.id) : []), [root, files]);
+  // The same object on other pages: same id, or a per-chapter copy with the same content at the same spot.
+  const copies = useMemo(() => (root && page ? sameObjectEverywhere(files, page, root.id) : []), [root, files, page]);
+  const pages = copies.map((r) => r.page);
   // Objects sitting on top of this one (a callout's text, an arrow's label) usually go with it.
   const covered = useMemo(() => {
     if (!root) return [];
@@ -144,10 +147,12 @@ function RemoveObject({ el }: { el: Element }) {
 
   const remove = async () => {
     const byPage = new Map<string, string[]>();
-    for (const p of scope === 'all' ? pages.length ? pages : [page] : [page]) {
-      // Only hide the covered objects on pages that actually have them.
-      const t = textOf(files[p]);
-      byPage.set(p, ids.filter((id) => id === root.id || p === page || new RegExp(`'${id}'`).test(t)));
+    const refs = scope === 'all' && copies.length ? copies : [{ page, id: root.id }];
+    // What sits on it goes too, on each page as that page's copy of it.
+    const coveredCopies = withCovered ? covered.map((c) => sameObjectEverywhere(files, page, c.id)) : [];
+    for (const r of refs) {
+      const extra = r.page === page ? covered.map((c) => c.id) : coveredCopies.flatMap((list) => list.filter((x) => x.page === r.page).map((x) => x.id));
+      byPage.set(r.page, [r.id, ...(withCovered ? extra : [])]);
     }
     const parts = new Map(ids.map((id) => [id, partIds(id, doc)]));
     live.select(null);
@@ -171,10 +176,10 @@ function RemoveObject({ el }: { el: Element }) {
         {others.length > 0 && (
           <div className="scope">
             <label className="check-row">
-              <input type="radio" checked={scope === 'page'} onChange={() => setScope('page')} /> This page only
+              <input type="radio" checked={scope === 'all'} onChange={() => setScope('all')} /> All {pages.length} pages that have it
             </label>
             <label className="check-row">
-              <input type="radio" checked={scope === 'all'} onChange={() => setScope('all')} /> All {pages.length} pages that have it
+              <input type="radio" checked={scope === 'page'} onChange={() => setScope('page')} /> This page only
             </label>
           </div>
         )}
@@ -193,7 +198,7 @@ function PositionObject({ el }: { el: Element }) {
   const s = useStore();
   const lv = useLive();
   const o = useMemo(() => live.selectedObject(el), [el, s.project?.files]); // eslint-disable-line react-hooks/exhaustive-deps
-  const pages = useMemo(() => (o ? pagesWithObject(s.project!.files, o.id) : []), [o?.id, s.project?.files]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pages = useMemo(() => (o ? live.copiesAtSameSpot(o.page, o.id) : []), [o?.page, o?.id, s.project?.files]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!o) return null;
   const set = (axis: 'x' | 'y', value: string) => {
     const n = Math.round(Number(value));
@@ -220,14 +225,17 @@ function PositionObject({ el }: { el: Element }) {
         {pages.length > 1 && (
           <div className="scope">
             <label className="check-row">
-              <input type="radio" checked={lv.moveScope === 'page'} onChange={() => live.setMoveScope('page')} /> Move on this page only
+              <input type="radio" checked={lv.moveScope === 'all'} onChange={() => live.setMoveScope('all')} /> Move on all {pages.length} pages that have it here
             </label>
             <label className="check-row">
-              <input type="radio" checked={lv.moveScope === 'all'} onChange={() => live.setMoveScope('all')} /> Move on all {pages.length} pages that have it
+              <input type="radio" checked={lv.moveScope === 'page'} onChange={() => live.setMoveScope('page')} /> Move on this page only
             </label>
           </div>
         )}
-        <p className="hint">Drag it on the page, or use the arrow keys (Shift for 10px). The page's own position for it is updated.</p>
+        <p className="hint">
+          Drag it on the page, or use the arrow keys (Shift for 10px). Copies on other pages at the same spot, including each
+          chapter's own copy, move with it; a page that places it elsewhere keeps its own position.
+        </p>
       </div>
     </details>
   );

@@ -136,8 +136,12 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - **Move** objects: drag the selected object, nudge it with the arrow keys (Shift: 10px), or type an
   exact X/Y in the Position panel. Lectora's page declares each object's position
   (`new ObjText('text63337', null, 320, 9, …)` and `addIe8Attr(320, 9, …)`); those numbers are
-  rewritten, so the course places the object there itself. Objects repeated on many pages can be moved
-  on all of them (only where they sit at the same spot; a page that placed one elsewhere keeps its own)
+  rewritten, so the course places the object there itself. An object repeated on many pages moves on
+  all of them by default (or on this page only). "The same object" means the same id, or, since
+  Lectora makes a separate copy per chapter (the copyright line is `text236596` in one chapter and
+  `text236384` in another), the same kind and size at the same spot with the same text, name or image.
+  Only copies at the same spot move; a page that placed it elsewhere (a different layout) keeps its own.
+  Remove and text edits use the same matching
 - Editing text that belongs to an object repeated across pages (a copyright line, a header) ticks
   every page that has that object, so it changes everywhere by default
 - Ctrl/⌘+Z and Ctrl/⌘+Y (or Shift+Z) undo and redo in every view, including while the Live edit
@@ -222,5 +226,6 @@ src/lib/frameFollow.ts  Follows the page a Live edit / Preview frame has navigat
 src/lib/removeObjects.ts  Hiding page objects by id (Live edit Remove / Restore)
 src/lib/pageIdentity.ts   Which page a running document shows (address, or Lectora objects)
 src/lib/moveObjects.ts    Reading and rewriting Lectora objects' declared positions
+src/lib/objectTwins.ts    The same object on other pages (same id, or a per-chapter copy)
 src/components/       React UI (ribbon, explorer, stage, properties)
 ```
