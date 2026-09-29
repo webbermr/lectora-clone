@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { CodeView } from './components/CodeView';
 import { EditStage, handleEditorKey } from './components/EditStage';
+import { LiveStage } from './components/LiveStage';
+import { MatchChooser } from './components/MatchChooser';
 import { PreviewStage } from './components/PreviewStage';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { Sidebar } from './components/Sidebar';
@@ -37,6 +39,7 @@ export function App() {
         <Sidebar />
         <main className="stage">
           {s.view === 'edit' && <EditStage width={width} />}
+          {s.view === 'live' && <LiveStage width={width} />}
           {s.view === 'preview' && <PreviewStage width={width} />}
           {s.view === 'code' && <CodeView />}
         </main>
@@ -50,6 +53,7 @@ export function App() {
           {{ saved: '✓ Saved', saving: 'Saving…', dirty: 'Unsaved changes', error: '⚠ Save failed' }[s.saveState]}
         </span>
       </footer>
+      <MatchChooser />
     </div>
   );
 }

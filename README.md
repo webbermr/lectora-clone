@@ -20,6 +20,7 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 
 - `coffee-basics-scorm12.zip`: three-page SCORM 1.2 course, zipped inside a parent folder
 - `workshop-safety-scorm2004.zip`: single-SCO SCORM 2004 course with `xml:base` and sequencing
+- `fire-safety-scripted-scorm12.zip`: pages drawn by JavaScript (text in JS strings and a data file), for trying Live edit
 
 ## What it does
 
@@ -43,6 +44,20 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   Esc deselects, Ctrl+Z / Ctrl+Y undo/redo
 - Stage width presets (desktop, laptop, tablet, phone)
 
+**Live edit view** (for pages built by JavaScript)
+- Runs the page with its scripts, like a learner sees it, and lets you click text and images
+- Shows which source file each piece of text lives in, then rewrites it there. It finds text
+  inside JavaScript strings, JSON data files, HTML entities, `\u` escapes and `escape()` output,
+  and writes the new text back in the same encoding so the file stays valid
+- Double-click text to type over it, or edit it in the Properties panel (needed for SVG text)
+- Replace an image or media file in place (it keeps its file name, so nothing else changes)
+- **Interact** mode lets you click through a single-page player to the screen you want
+- If the same text appears in several places, you pick which ones change
+- Edit view spots pages that are mostly script and offers to switch to Live edit
+
+**Find & Replace** (sidebar)
+- Searches every text file in the package, however the text is encoded
+
 **Preview view**
 - Runs the course with scripts enabled against a built-in LMS
   (`window.API` for 1.2 and `window.API_1484_11` for 2004)
@@ -58,11 +73,12 @@ Projects autosave to IndexedDB, with full undo/redo for every change.
 
 ## Limitations
 
-- **Script-rendered content.** The Edit view pauses the page's JavaScript so you
-  edit the HTML as authored. Packages whose pages are drawn by a JavaScript
-  player at runtime (most Articulate Storyline, Rise and Captivate exports) will
-  look empty or partial in Edit view. They still run in Preview, and their text
-  usually lives in JS/JSON/XML data files you can change in Code view.
+- **Script-rendered content.** The Edit view pauses the page's JavaScript, so
+  pages drawn by a player at runtime look empty there. Use Live edit for those.
+  Live edit changes text and swaps images/media, but it can't move, resize or add
+  objects on a script-built page. Text that the runtime assembles from pieces, or
+  draws on a `<canvas>`, can't be traced back to the source; Find & Replace
+  with a shorter phrase is the fallback.
 - **Lectora's own format.** This edits published SCORM output, not Lectora `.awt`
   project files. Lectora HTML output is mostly positioned `<div>`s, so its text
   and images are editable, but its runtime JavaScript also references object IDs.
@@ -92,5 +108,7 @@ src/lib/vfs.ts        Cache Storage + public/sw.js serve project files to iframe
 src/lib/store.ts      project state, undo/redo, autosave
 src/lib/editor.ts     live editing session (select, insert, commit)
 src/lib/scormApi.ts   preview LMS
+src/lib/sourceMatch.ts  find on-screen text in source, however it's encoded
+src/lib/live.ts       Live edit session (text write-back, asset replacement)
 src/components/       React UI (ribbon, explorer, stage, properties)
 ```

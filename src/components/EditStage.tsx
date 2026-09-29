@@ -27,6 +27,7 @@ export function EditStage({ width }: { width: string }) {
   const labelRef = useRef<HTMLSpanElement>(null);
   const hovered = useRef<HTMLElement | null>(null);
   const [src, setSrc] = useState<string | null>(null);
+  const [scripted, setScripted] = useState(false);
   const doctypeRef = useRef('');
   const cleanupRef = useRef<() => void>(() => {});
 
@@ -34,6 +35,7 @@ export function EditStage({ width }: { width: string }) {
   useEffect(() => {
     let cancelled = false;
     editor.attach(null, null, '');
+    setScripted(false);
     if (!projectId || !path || !isHtmlFile(path)) {
       setSrc(null);
       return;
@@ -89,6 +91,7 @@ export function EditStage({ width }: { width: string }) {
     if (!doc || !path) return;
     editor.attach(doc, path, doctypeRef.current);
     cleanupRef.current = wireDocument(doc, hovered);
+    setScripted(looksScriptBuilt(doc));
   };
 
   const startResize = (dir: string, e: React.PointerEvent) => {
@@ -141,6 +144,16 @@ export function EditStage({ width }: { width: string }) {
   }
 
   return (
+    <div className="stage-col">
+      {scripted && (
+        <div className="banner">
+          <span>
+            <b>This page is built by JavaScript</b>, so there's little or nothing to edit in its raw HTML. Live edit runs
+            the scripts and lets you click the text and images you see.
+          </span>
+          <button className="primary" onClick={() => store.setView('live')}>⚡ Open in Live edit</button>
+        </div>
+      )}
     <div className="stage-scroll">
       <div className="stage-frame" style={{ width }}>
         {src && <iframe ref={iframeRef} src={src} onLoad={onLoad} title="Page editor" className="stage-iframe" />}
@@ -155,7 +168,18 @@ export function EditStage({ width }: { width: string }) {
         </div>
       </div>
     </div>
+    </div>
   );
+}
+
+/** Little visible text but plenty of script: the page is drawn at runtime. */
+function looksScriptBuilt(doc: Document): boolean {
+  const body = doc.body?.cloneNode(true) as HTMLElement | undefined;
+  body?.querySelectorAll('script, style, noscript, template').forEach((n) => n.remove());
+  const text = (body?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const media = doc.body?.querySelectorAll('img, video, svg, canvas').length ?? 0;
+  const scriptChars = Array.from(doc.scripts).reduce((n, s) => n + (s.textContent?.length ?? 0) + (s.src ? 500 : 0), 0);
+  return scriptChars > 200 && (text.length < 40 || scriptChars > text.length * 5) && media < 3;
 }
 
 export function describe(el: Element): string {
