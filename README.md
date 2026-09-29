@@ -51,6 +51,10 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   and writes the new text back in the same encoding so the file stays valid
 - Double-click text to type over it, or edit it in the Properties panel (needed for SVG text)
 - Replace an image or media file in place (it keeps its file name, so nothing else changes)
+- With nothing selected, the right panel lists every image, video, audio and other file the page
+  uses, with thumbnails, sizes and dimensions. It includes files the page's script only names
+  (audio played by an action, a popup not yet open), marks what's on screen, and lets you
+  **Show** or **Replace** each one. Lectora's transparent spacer GIFs are left out
 - **Interact** mode lets you click through a single-page player to the screen you want
 - If the same text appears in several places, you pick which ones change
 - Edit view spots pages that are mostly script and offers to switch to Live edit

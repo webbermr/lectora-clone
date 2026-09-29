@@ -80,6 +80,7 @@ function wireTree(doc: Document, wired: WeakSet<Document>) {
   if (!wired.has(doc) && doc.documentElement) {
     wired.add(doc);
     wireDocument(doc);
+    live.register(doc);
   }
   for (const f of Array.from(doc.querySelectorAll('iframe, frame'))) {
     try {

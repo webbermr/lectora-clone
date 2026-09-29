@@ -213,7 +213,16 @@ text2.build();
 var image1 = new ObjImage('image1', 620, 100, 200, 'images/extinguisher.png');
 image1.build();
 var button1 = new ObjButton('button1', 760, 490, 'Next', 'a001_extinguishers.html');
-button1.build();`));
+button1.build();
+document.getElementById('stage').style.backgroundImage = "url('images/bg_paper.png')";
+var spacer = new ObjImage('spacer1', 0, 0, 1, 'images/trans.gif');
+spacer.build();
+// Narration is only created when an action plays it, so it is not on screen at load.
+var audio1 = { id: 'audio1', src: 'media/welcome_narration.mp3' };`));
+zip3.file('images/bg_paper.png', png(250, 246, 236));
+zip3.file('images/trans.gif', Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
+// Not real audio; the asset list only needs the file to exist.
+zip3.file('media/welcome_narration.mp3', Buffer.from('ID3' + '\0'.repeat(400)));
 zip3.file('data/slide2.js', `window.slideData = {"title":"Extinguisher types","lines":["Water \\u2014 for paper and wood","CO\\u2082 \\u2014 for electrical fires","Always check the gauge before use"]};\n`);
 zip3.file('a001_extinguishers.html', `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Extinguishers</title>
