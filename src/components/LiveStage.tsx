@@ -7,6 +7,7 @@ import { store, useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
 import { useFollowFrame } from '../lib/frameFollow';
 import { undoShortcut } from '../lib/undoKeys';
+import { warmSignatures } from '../lib/objectTwins';
 
 const LIVE_CSS =
   '[data-lc-live-hover]{outline:2px dashed #2f7de1!important;outline-offset:1px!important;cursor:pointer!important}' +
@@ -29,6 +30,8 @@ export function LiveStage({ width }: { width: string }) {
   const [nonce, setNonce] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   useFollowFrame(iframeRef, p.id);
+  // Matching an object to its copies on other pages reads every page once; do that in the background.
+  useEffect(() => warmSignatures(p.files), [p.files]);
 
   useEffect(() => {
     previewLms.install(window);

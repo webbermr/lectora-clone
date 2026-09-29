@@ -13,8 +13,9 @@ import { encodeText } from './text';
 import { referencedAssets, textOf } from './assetRefs';
 import { vfsUrl } from './vfs';
 import { documentPage } from './pageIdentity';
-import { REMOVED_STYLE_ID, declaredObjects, hiddenIds, hiddenRules, objectRoot, pagesWithObject, partIds, removedCss, setHidden } from './removeObjects';
+import { REMOVED_STYLE_ID, declaredObjects, hiddenIds, hiddenRules, objectRoot, partIds, removedCss, setHidden } from './removeObjects';
 import { declaredPosition, declaredPositions, moveInSource, type Point } from './moveObjects';
+import { sameObjectEverywhere, type ObjectRef } from './objectTwins';
 
 export type LiveMode = 'select' | 'interact';
 
@@ -250,20 +251,31 @@ class LiveSession {
     const el = node.parentElement;
     if (!page || !files[page] || !el) return [];
     const root = objectRoot(el, declaredObjects(textOf(files[page])));
-    return root ? pagesWithObject(files, root.id) : [];
+    return root ? [...new Set(sameObjectEverywhere(files, page, root.id).map((r) => r.page))] : [];
+  }
+
+  /** The object and its copies on other pages that sit at the same spot (what a move applies to). */
+  copiesAtSameSpot(page: string, id: string): ObjectRef[] {
+    const files = store.project!.files;
+    const from = files[page] ? declaredPosition(textOf(files[page]), id) : null;
+    if (!from) return [];
+    return sameObjectEverywhere(files, page, id).filter((r) => {
+      const at = declaredPosition(textOf(files[r.page]), r.id);
+      return at && at.x === from.x && at.y === from.y;
+    });
   }
 
   // ---- moving objects (see moveObjects.ts: the page's own declared position changes) ----
 
-  /** Move on this page only, or on every page that has the object at the same spot. */
-  moveScope: 'page' | 'all' = 'page';
+  /** Move on every page that has the object at the same spot (the default), or on this page only. */
+  moveScope: 'page' | 'all' = 'all';
   setMoveScope(scope: 'page' | 'all') {
     this.moveScope = scope;
     this.emit();
   }
 
   /** The Lectora object the selection belongs to, with where its page declares it. */
-  selectedObject(el: Element | null = this.selected): { doc: Document; id: string; element: Element; at: Point } | null {
+  selectedObject(el: Element | null = this.selected): { doc: Document; page: string; id: string; element: Element; at: Point } | null {
     if (!el || !el.isConnected || !el.ownerDocument.defaultView) return null;
     const doc = el.ownerDocument;
     const files = store.project?.files;
@@ -272,7 +284,7 @@ class LiveSession {
     const html = textOf(files[page]);
     const root = objectRoot(el, declaredObjects(html));
     const at = root ? declaredPosition(html, root.id) : null;
-    return root && at ? { doc, id: root.id, element: root.element, at } : null;
+    return root && at ? { doc, page, id: root.id, element: root.element, at } : null;
   }
 
   /** Arrow keys: move the selected object by a few pixels. */
@@ -287,17 +299,13 @@ class LiveSession {
     const files = store.project!.files;
     const page = this.pageOf(doc);
     if (!page || !files[page]) return;
-    const from = declaredPosition(textOf(files[page]), id);
-    if (!from) return;
-    const pages = this.moveScope === 'all' ? pagesWithObject(files, id) : [page];
+    // Only copies at the same spot; a page that placed it elsewhere keeps its own layout.
+    const refs = this.moveScope === 'all' ? this.copiesAtSameSpot(page, id) : [{ page, id }];
     const writes: FileChange[] = [];
-    for (const p of pages) {
-      const html = textOf(files[p]);
-      const here = declaredPosition(html, id);
-      // Only where it sits at the same spot; a page that placed it elsewhere keeps its own layout.
-      if (!here || here.x !== from.x || here.y !== from.y) continue;
-      const next = moveInSource(html, id, to);
-      if (next !== html) writes.push({ path: p, bytes: encodeText(next) });
+    for (const r of refs) {
+      const html = textOf(files[r.page]);
+      const next = moveInSource(html, r.id, to);
+      if (next !== html) writes.push({ path: r.page, bytes: encodeText(next) });
     }
     if (!writes.length) return;
     await store.write(`Move ${id}`, writes, { fromStage: true });
