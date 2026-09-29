@@ -1,4 +1,4 @@
-# Lectora Clone
+# SCORM Editor
 
 A browser-based SCORM course editor in the spirit of Lectora. Import a SCORM
 `.zip`, edit its pages visually, preview it against a built-in LMS, and publish

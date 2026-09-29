@@ -2,7 +2,7 @@
 
 export const SCORM_HELPER_PATH = 'lc_scorm.js';
 
-export const SCORM_HELPER_JS = `/* SCORM helper added by Lectora Clone. Finds the LMS API, marks the page complete. */
+export const SCORM_HELPER_JS = `/* SCORM helper added by SCORM Editor. Finds the LMS API, marks the page complete. */
 (function () {
   function find(win, name) {
     for (var i = 0; win && i < 10; i++) {
