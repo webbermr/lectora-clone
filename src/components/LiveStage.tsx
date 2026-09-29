@@ -29,7 +29,15 @@ export function LiveStage({ width }: { width: string }) {
 
   useEffect(() => {
     previewLms.install(window);
-    return () => live.select(null);
+    // S / I switch modes from anywhere in the editor (the page's own keys are handled in wireDocument).
+    const onKey = (e: KeyboardEvent) => {
+      if (modeShortcut(e)) e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      live.select(null);
+    };
   }, []);
 
   // Pages can load more frames or swap documents as the learner moves on
@@ -52,11 +60,11 @@ export function LiveStage({ width }: { width: string }) {
     <div className="preview">
       <div className="preview-bar">
         <div className="segmented" role="group" aria-label="Live edit mode">
-          <button className={lv.mode === 'select' ? 'active' : ''} onClick={() => live.setMode('select')} title="Click text or images to edit them">
-            ✎ Select &amp; edit
+          <button className={lv.mode === 'select' ? 'active' : ''} onClick={() => live.setMode('select')} title="Click text or images to edit them (shortcut: S)" aria-keyshortcuts="S">
+            ✎ Select &amp; edit <kbd>S</kbd>
           </button>
-          <button className={lv.mode === 'interact' ? 'active' : ''} onClick={() => live.setMode('interact')} title="Use the page normally, e.g. click Next to reach the slide you want">
-            🖱 Interact
+          <button className={lv.mode === 'interact' ? 'active' : ''} onClick={() => live.setMode('interact')} title="Use the page normally, e.g. click Next to reach the slide you want (shortcut: I)" aria-keyshortcuts="I">
+            🖱 Interact <kbd>I</kbd>
           </button>
         </div>
         <span className="muted small">
@@ -74,6 +82,31 @@ export function LiveStage({ width }: { width: string }) {
       </div>
     </div>
   );
+}
+
+const TEXT_INPUTS = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'datetime-local', 'month', 'time', 'week', '']);
+
+/** True when the key is going into something the user types in (in the editor or inside the course page). */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== 'string') return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName.toUpperCase();
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  return tag === 'INPUT' && TEXT_INPUTS.has(((el as HTMLInputElement).type ?? '').toLowerCase());
+}
+
+/**
+ * S → Select & edit, I → Interact. Ignored while typing in a text box, with
+ * modifier keys (so Ctrl+S etc. still work), or while a dialog is open.
+ */
+export function modeShortcut(e: KeyboardEvent): boolean {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || e.defaultPrevented) return false;
+  const k = e.key.toLowerCase();
+  if (k !== 's' && k !== 'i') return false;
+  if (isTypingTarget(e.target) || document.querySelector('.modal-backdrop')) return false;
+  live.setMode(k === 's' ? 'select' : 'interact');
+  return true;
 }
 
 function wireTree(doc: Document, wired: WeakSet<Document>) {
@@ -169,7 +202,14 @@ function wireDocument(doc: Document) {
   };
 
   const onKey = (e: KeyboardEvent) => {
-    if (!editing) return;
+    if (!editing) {
+      // Mode shortcuts work while the page has focus too; the course never sees the key.
+      if (modeShortcut(e)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void finish(true);

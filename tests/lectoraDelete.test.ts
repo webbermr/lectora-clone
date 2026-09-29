@@ -166,3 +166,140 @@ describe('course check', () => {
     expect(loop?.message).toContain('a001_reporting_welcome.html');
   });
 });
+
+describe('table of contents', () => {
+  const tocOf = (files: FileMap) => text(files, 'a001_toc1.html');
+
+  it('removes deleted pages and chapters left empty, instead of pointing them elsewhere', async () => {
+    const files = await load();
+    const m = parseManifest(text(files, 'imsmanifest.xml'));
+    const mod = Object.keys(files).filter((f) => f.startsWith('a001_workplace_safety_'));
+    const plan = planDelete(files, m, [...mod, 'a001_reporting_when_to_report.html']);
+    expect(plan.toc).toEqual([{ file: 'a001_toc1.html', entriesRemoved: 6, chaptersRemoved: ['Workplace Safety'], relinked: [] }]);
+    const toc = tocOf(apply(files, planChanges(plan)));
+    expect(toc).not.toContain('workplace_safety');
+    expect(toc).not.toContain('When To Report');
+    expect(toc).not.toContain('"Workplace Safety"');
+    expect(toc).toContain('NewLink("Module Summary", "a001_reporting_module_summary.html"'); // neighbours untouched
+    expect(plan.warnings.join(' ')).not.toMatch(/table of contents/i);
+  });
+
+  it("moves a chapter's link to its first remaining page when that page is deleted", async () => {
+    const files = await load();
+    const plan = planDelete(files, parseManifest(text(files, 'imsmanifest.xml')), ['a001_reporting_welcome.html']);
+    expect(plan.toc[0].relinked).toEqual(['Reporting']);
+    expect(tocOf(apply(files, planChanges(plan)))).toContain('NewFolder("Reporting", "a001_reporting_when_to_report.html", "chap", 400)');
+  });
+});
+
+describe('fixed progress totals', () => {
+  it('lowers the page total by the pages removed, so progress can still reach 100%', async () => {
+    const files = await load();
+    const m = parseManifest(text(files, 'imsmanifest.xml'));
+    const mod = Object.keys(files).filter((f) => f.startsWith('a001_workplace_safety_'));
+    const plan = planDelete(files, m, mod);
+    expect(plan.progressTotals).toEqual([{ counter: 'Varprogress_track', total: 'Vara_progress_total', before: 13, after: 8, files: 1 }]);
+    const dash = text(apply(files, planChanges(plan)), 'a001_student_dashboard.html');
+    expect(dash).toContain("Vara_progress_total = new Variable( 'Vara_progress_total', '8' )");
+    expect(dash).toMatch(/new ObjProgress\('progress1',.*,1,8,/); // the dashboard bar is resized too
+    const r = checkCourse(apply(files, planChanges(plan)), parseManifest(text(apply(files, planChanges(plan)), 'imsmanifest.xml')));
+    expect(r.issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('course check catches a total the pages can no longer reach', async () => {
+    const files = await load();
+    const crude = { ...files };
+    for (const f of Object.keys(files).filter((x) => x.startsWith('a001_workplace_safety_'))) delete crude[f];
+    const r = checkCourse(crude, parseManifest(text(crude, 'imsmanifest.xml')));
+    const stuck = r.issues.find((i) => i.kind === 'Progress can’t reach 100%');
+    expect(stuck?.message).toContain('Vara_progress_total');
+    expect(stuck?.message).toContain('13');
+  });
+});
+
+describe('course check false alarms', () => {
+  it("ignores names inside Lectora's own runtime files and decodes %20 in the manifest", async () => {
+    const files = await load();
+    const withRuntime = {
+      ...files,
+      'trivantis-cookie.js': new TextEncoder().encode("var n = 'LectoraPermCookie_title.html';"),
+    };
+    const r = checkCourse(withRuntime, parseManifest(text(files, 'imsmanifest.xml')));
+    expect(r.issues.filter((i) => i.severity !== 'info')).toEqual([]);
+    expect(parseManifest(text(files, 'imsmanifest.xml')).resources.find((x) => x.identifier === 'R_extern')!.files).toEqual(['resources/Safety Handbook.pdf']);
+  });
+});
+
+describe('titles', () => {
+  it('uses the table of contents names in the chapter tree', async () => {
+    const { inferLectoraStructure } = await import('../src/lib/structure');
+    const files = await load();
+    const s = inferLectoraStructure(parseManifest(text(files, 'imsmanifest.xml')), files)!;
+    const gs = s.modules.find((m) => m.title === 'Getting Started')!;
+    // The TOC says "How To Navigate"; the file-name guess would be "How to Navigate".
+    expect(gs.children.map((c) => c.title)).toContain('How To Navigate');
+  });
+});
+
+describe('deleting test questions', () => {
+  it('decrypts the test with the package\'s own enc.js and trivantis-titlemgr.js', async () => {
+    const { openTests } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const t = openTests(files);
+    expect(t && 'xml' in t).toBe(true);
+    const xml = (t as { xml: Map<string, string> }).xml.get('_tobj700.txt')!;
+    expect(xml).toContain('<name>a001_test_module_1_q2.html</name>');
+  });
+
+  it('removes questions, keeps the draw within what is left, and re-encrypts', async () => {
+    const { openTests, testPages } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const tests = openTests(files)!;
+    const m = parseManifest(text(files, 'imsmanifest.xml'));
+    const plan = planDelete(files, m, ['a001_test_module_1_q1.html', 'a001_test_module_1_q2.html'], { tests });
+    expect(plan.blocked).toBeUndefined();
+    expect(plan.tests).toEqual([
+      {
+        file: '_tobj700.txt',
+        questionsRemoved: 2,
+        sectionsRemoved: [],
+        numrandom: [{ section: '710', before: 2, after: 1 }],
+        relinked: [],
+        drawn: { before: 4, after: 3 },
+      },
+    ]);
+    const xml = plan.testXml.get('_tobj700.txt')!;
+    expect(testPages(xml)).toEqual(['a001_test_module_1_q3.html', 'a001_test_module_2_q1.html', 'a001_test_module_2_q2.html', 'a001_test_test_results.html']);
+    // Section 2 starts where its first question now sits; pages count up with no gaps.
+    expect([...xml.matchAll(/<section>\s*<index>(\d+)/g)].map((x) => x[1])).toEqual(['0', '1']);
+
+    // Encrypted as the flow would, then read back by the package's own code.
+    const sealed = (tests as { cipher: { encrypt(x: string): string } }).cipher.encrypt(xml);
+    expect(sealed.startsWith('U2FsdGVkX1')).toBe(true);
+    const after = apply(files, [...planChanges(plan), { path: '_tobj700.txt', bytes: new TextEncoder().encode(sealed) }]);
+    const reopened = openTests(after) as { xml: Map<string, string> };
+    expect(reopened.xml.get('_tobj700.txt')).toBe(xml);
+    const r = checkCourse(after, parseManifest(text(after, 'imsmanifest.xml')), openTests(after));
+    expect(r.issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('removes a whole section and protects the results page', async () => {
+    const { openTests } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const tests = openTests(files)!;
+    const m = parseManifest(text(files, 'imsmanifest.xml'));
+    const plan = planDelete(files, m, ['a001_test_module_2_q1.html', 'a001_test_module_2_q2.html'], { tests });
+    expect(plan.tests[0].sectionsRemoved).toEqual(['720']);
+    expect(plan.tests[0].drawn).toEqual({ before: 4, after: 2 });
+    expect(planDelete(files, m, ['a001_test_test_results.html'], { tests }).blocked).toMatch(/results page/);
+  });
+
+  it('course check catches a test that lists missing pages', async () => {
+    const { openTests } = await import('../src/lib/lectoraTest');
+    const files = await load();
+    const crude = { ...files };
+    delete crude['a001_test_module_1_q1.html'];
+    const r = checkCourse(crude, parseManifest(text(crude, 'imsmanifest.xml')), openTests(crude));
+    expect(r.issues.find((i) => i.kind === 'Test')?.message).toContain('a001_test_module_1_q1.html');
+  });
+});

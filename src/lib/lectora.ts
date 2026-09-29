@@ -21,6 +21,7 @@ import { referencedAssets, textOf } from './assetRefs';
 import { removeResourcesAndFiles, type ManifestModel } from './manifest';
 import type { FileMap } from './package';
 import { basename, isHtmlFile, isTextFile } from './paths';
+import { editTestXml, type OpenedTests, type TestEdit } from './lectoraTest';
 import { encodeText } from './text';
 
 export const TRACKING_FILE = 'trivantis-pagetracking.js';
@@ -182,8 +183,31 @@ export interface SatisfiedVariable {
   files: string[];
 }
 
+export interface TocChange {
+  file: string;
+  entriesRemoved: number;
+  chaptersRemoved: string[];
+  /** Chapter entries whose own link pointed at a deleted page and now opens its first remaining page. */
+  relinked: string[];
+}
+
+export interface ProgressTotalChange {
+  /** Counter pages add to as the learner moves on, e.g. Varprogress_track. */
+  counter: string;
+  /** Fixed total it's compared with, e.g. Vara_progress_total. */
+  total: string;
+  before: number;
+  after: number;
+  files: number;
+}
+
 export interface DeletePlan {
   pages: string[];
+  /** Edited test XML (plain text); encrypted into `edits` just before applying. */
+  testXml: Map<string, string>;
+  tests: TestEdit[];
+  toc: TocChange[];
+  progressTotals: ProgressTotalChange[];
   /** Flags only deleted pages set; the pages that check them now answer as if they'd been set. */
   satisfied: SatisfiedVariable[];
   assets: string[];
@@ -230,13 +254,13 @@ export function planDelete(
   files: FileMap,
   manifest: ManifestModel | null,
   pagesToDelete: string[],
-  opts: { allowTests?: boolean; keepFinishable?: boolean } = {},
+  opts: { allowTests?: boolean; keepFinishable?: boolean; tests?: OpenedTests | { error: string } | null } = {},
 ): DeletePlan {
   const keepFinishable = opts.keepFinishable ?? true;
   const course = readLectoraCourse(files, manifest);
   const pages = [...new Set(pagesToDelete)].filter((p) => files[p]);
   const del = new Set(pages);
-  const plan: DeletePlan = { pages, satisfied: [], assets: [], rewires: [], edits: new Map(), trackingNodesRemoved: 0, warnings: [] };
+  const plan: DeletePlan = { pages, testXml: new Map(), tests: [], toc: [], progressTotals: [], satisfied: [], assets: [], rewires: [], edits: new Map(), trackingNodesRemoved: 0, warnings: [] };
 
   const protectedHit = pages.filter((p) => PROTECTED.test(basename(p)));
   if (protectedHit.length) {
@@ -244,12 +268,18 @@ export function planDelete(
     return plan;
   }
   const ids = course.tracking ? allIds(course.tracking.title) : new Map<number, boolean>();
-  const testPages = pages.filter((p) => ids.get(course.idOf.get(p) ?? -1));
-  if (testPages.length && !opts.allowTests) {
+  const tests = opts.tests && 'xml' in opts.tests ? opts.tests : null;
+  const testPagesHit = pages.filter((p) => ids.get(course.idOf.get(p) ?? -1));
+  if (testPagesHit.length && !tests && !opts.allowTests) {
+    const why = opts.tests && 'error' in opts.tests ? ` ${opts.tests.error}` : '';
     plan.blocked =
-      `${testPages.length} of these pages belong to the test. Test questions are also listed in the test's own ` +
-      'definition file (_tobj….txt), which this version does not update yet, so removing them could stop the test ' +
-      'from scoring or finishing. Leave the test pages out of this delete for now.';
+      `${testPagesHit.length} of these pages belong to the test. The test's question list (_tobj….txt) has to be updated ` +
+      `too, or the test could stop scoring or finishing, and it couldn't be read.${why} Leave the test pages out of this delete for now.`;
+    return plan;
+  }
+  const resultsHit = tests ? [...tests.xml.values()].flatMap((x) => [...x.matchAll(/<page[^>]*hasResults[^>]*>[\s\S]*?<name>([^<]*)<\/name>/g)].map((m) => basename(m[1]))).filter((n) => del.has(n) || pages.some((p) => basename(p) === n)) : [];
+  if (resultsHit.length) {
+    plan.blocked = `${resultsHit.join(', ')} is the test's results page; the test needs it to show and record the score.`;
     return plan;
   }
 
@@ -287,9 +317,21 @@ export function planDelete(
 
   for (const [f, bytes] of Object.entries(files)) {
     if (del.has(f) || f === 'imsmanifest.xml' || f === TRACKING_FILE || !isTextFile(f) || !linkRe) continue;
-    const text = textOf(bytes);
+    const original = textOf(bytes);
+    let text = original;
+    // Table of contents: drop the deleted pages' entries (and emptied chapters) outright.
+    if (isTocFile(f)) {
+      const toc = removeFromToc(text, new Set(names));
+      if (toc.entriesRemoved || toc.chaptersRemoved.length || toc.relinked.length) {
+        plan.toc.push({ file: f, entriesRemoved: toc.entriesRemoved, chaptersRemoved: toc.chaptersRemoved, relinked: toc.relinked });
+        text = toc.text;
+      }
+    }
     linkRe.lastIndex = 0;
-    if (!linkRe.test(text)) continue;
+    if (!linkRe.test(text)) {
+      if (text !== original) plan.edits.set(f, text);
+      continue;
+    }
     linkRe.lastIndex = 0;
     const out = text.replace(linkRe, (whole: string, name: string) => {
       const to = target(f, byName.get(name)!);
@@ -303,11 +345,30 @@ export function planDelete(
       rewireCount.set(key, r);
       return basename(to);
     });
-    if (out !== text) plan.edits.set(f, out);
+    if (out !== original) plan.edits.set(f, out);
   }
   plan.rewires = [...rewireCount.values()];
   if (unresolved.size) {
     plan.warnings.push(`${unresolved.size} link(s) have no page left to point to and were left as they are: ${[...unresolved].slice(0, 5).join('; ')}`);
+  }
+
+  // --- The test's question list -------------------------------------------------
+  if (tests) {
+    const deletedNames = new Set(names);
+    for (const [file, xml] of tests.xml) {
+      const { xml: out, edit } = editTestXml(file, xml, deletedNames, (page) => {
+        const t = target('', byName.get(basename(page)) ?? page);
+        return t ? basename(t) : undefined;
+      });
+      if (out === xml) continue;
+      plan.testXml.set(file, out);
+      plan.tests.push(edit);
+      if (edit.drawn.after < edit.drawn.before) {
+        plan.warnings.push(`The test will ask ${edit.drawn.after} questions per attempt instead of ${edit.drawn.before}. Its pass mark stays at the same percentage.`);
+      }
+    }
+  } else if (opts.tests && 'error' in opts.tests) {
+    plan.warnings.push(`The test couldn't be read, so it wasn't checked for references to these pages. ${opts.tests.error}`);
   }
 
   // --- Page tracking --------------------------------------------------------
@@ -422,13 +483,226 @@ export function planDelete(
         stuck.slice(0, 6).join('. ') + (stuck.length > 6 ? `. …and ${stuck.length - 6} more.` : '.'),
     );
   }
-  const tocRewires = plan.rewires.filter((r) => /_toc\d*\.html?$/i.test(r.file));
+  // --- Fixed progress totals ------------------------------------------------------
+  // e.g. progress = Varprogress_track / Vara_progress_total (379), where each page adds 1
+  // to Varprogress_track. Deleting pages that add to the counter lowers the most a learner
+  // can reach, so the total has to drop by the same amount or progress stops short of 100%.
+  for (const link of findProgressTotals(files)) {
+    const lost = pages.reduce((n, p) => n + (link.increments.get(p) ?? 0), 0);
+    if (!lost) continue;
+    const after = Math.max(0, link.value - lost);
+    let touched = 0;
+    for (const f of Object.keys(files)) {
+      if (del.has(f) || !/\.(html?|js)$/i.test(f)) continue;
+      const text = plan.edits.get(f) ?? textOf(files[f]);
+      const out = retargetTotal(text, link.counter, link.total, link.value, after);
+      if (out !== text) {
+        plan.edits.set(f, out);
+        touched++;
+      }
+    }
+    plan.progressTotals.push({ counter: link.counter, total: link.total, before: link.value, after, files: touched });
+  }
+
+  const tocRewires = plan.rewires.filter((r) => isTocFile(r.file));
   if (tocRewires.length) {
     plan.warnings.push(
-      `The table of contents (${[...new Set(tocRewires.map((r) => r.file))].join(', ')}) still lists the deleted pages by name; their entries now open the nearest remaining page.`,
+      `The table of contents (${[...new Set(tocRewires.map((r) => r.file))].join(', ')}) still names ${tocRewires.length} deleted page(s) in a form this version can't remove; those links now open the nearest remaining page.`,
     );
   }
   return plan;
+}
+
+// ---------------------------------------------------------------------------
+// Table of contents (a001_toc*.html)
+// ---------------------------------------------------------------------------
+
+export function isTocFile(path: string): boolean {
+  return /(^|\/)a\d{3}_toc\d*\.html?$/i.test(path);
+}
+
+const STR = String.raw`"(?:[^"\\]|\\.)*"`;
+const TOC_FOLDER = new RegExp(String.raw`^(\s*)(\w+)\s*=\s*insertFolder\(\s*(\w+)\s*,\s*NewFolder\(\s*(${STR})\s*,\s*"([^"]*)"\s*,\s*"\w*"\s*,\s*\d+\s*\)\s*\)\s*;?\s*$`);
+const TOC_ENTRY = new RegExp(String.raw`^\s*insertEntry\(\s*(\w+)\s*,\s*NewLink\(\s*(${STR})\s*,\s*"([^"]*)"\s*,\s*"\w*"\s*,\s*\d+\s*\)\s*\)\s*;?\s*$`);
+
+interface TocFolderLine {
+  line: number;
+  title: string;
+  link: string;
+  parent: number | null;
+  children: number;
+}
+
+/**
+ * Remove entries for deleted pages from Lectora's TOC script, then chapters left
+ * empty. A chapter whose own link pointed at a deleted page now opens its first
+ * remaining page. Lines this doesn't recognise are left exactly as they were.
+ */
+export function removeFromToc(text: string, deletedNames: Set<string>) {
+  const lines = text.split('\n');
+  const folders = new Map<number, TocFolderLine>();
+  const binding = new Map<string, number>(); // variable name -> folder line currently assigned to it
+  const drop = new Set<number>();
+  const firstEntry = new Map<number, string>();
+  const lostSome = new Set<number>(); // chapters that had at least one entry removed
+  let entriesRemoved = 0;
+
+  lines.forEach((l, i) => {
+    const f = TOC_FOLDER.exec(l);
+    if (f) {
+      const parent = binding.get(f[3]) ?? null;
+      folders.set(i, { line: i, title: JSON.parse(f[4]), link: f[5], parent, children: 0 });
+      if (parent !== null) folders.get(parent)!.children++;
+      binding.set(f[2], i);
+      return;
+    }
+    const e = TOC_ENTRY.exec(l);
+    if (!e) return;
+    const folder = binding.get(e[1]);
+    if (deletedNames.has(basename(e[3]))) {
+      drop.add(i);
+      entriesRemoved++;
+      if (folder !== undefined) lostSome.add(folder);
+      return;
+    }
+    if (folder !== undefined) {
+      folders.get(folder)!.children++;
+      if (!firstEntry.has(folder)) firstEntry.set(folder, e[3]);
+    }
+  });
+
+  // Remove emptied chapters, innermost first, so a parent emptied by that goes too.
+  const chaptersRemoved: string[] = [];
+  const byDepth = [...folders.values()].sort((a, b) => b.line - a.line);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const f of byDepth) {
+      // Only chapters that lost everything they had; never folders that were empty to begin with.
+      // (The root, fT = NewFolder(…), isn't an insertFolder line, so top-level chapters have no parent here.)
+      if (drop.has(f.line) || f.children > 0 || !lostSome.has(f.line)) continue;
+      drop.add(f.line);
+      chaptersRemoved.push(f.title);
+      if (f.parent !== null) {
+        folders.get(f.parent)!.children--;
+        lostSome.add(f.parent);
+      }
+      changed = true;
+    }
+  }
+
+  const relinked: string[] = [];
+  const out = lines
+    .map((l, i) => {
+      const f = folders.get(i);
+      if (!f || drop.has(i) || !deletedNames.has(basename(f.link))) return l;
+      const to = firstEntry.get(i);
+      if (!to) return l;
+      relinked.push(f.title);
+      return l.replace(`"${f.link}"`, `"${to}"`);
+    })
+    .filter((_, i) => !drop.has(i));
+  return { text: out.join('\n'), entriesRemoved, chaptersRemoved, relinked };
+}
+
+/** Page and chapter titles as the table of contents shows them (Lectora's real names). */
+export function tocTitles(files: FileMap): { pages: Map<string, string>; chapters: Map<string, string> } {
+  const pages = new Map<string, string>();
+  const chapters = new Map<string, string>(); // any page in the chapter -> chapter title
+  const title = (raw: string) => {
+    try {
+      return (JSON.parse(raw) as string).replace(/<[^>]+>/g, '').trim();
+    } catch {
+      return '';
+    }
+  };
+  for (const f of Object.keys(files).filter(isTocFile)) {
+    const current = new Map<string, string>(); // folder variable -> its title
+    for (const line of textOf(files[f]).split('\n')) {
+      const fo = TOC_FOLDER.exec(line);
+      if (fo) {
+        current.set(fo[2], title(fo[4]));
+        continue;
+      }
+      const e = TOC_ENTRY.exec(line);
+      if (!e) continue;
+      const page = basename(e[3]);
+      const t = title(e[2]);
+      if (t && !pages.has(page)) pages.set(page, t);
+      const chapter = current.get(e[1]);
+      if (chapter && !chapters.has(page)) chapters.set(page, chapter);
+    }
+  }
+  return { pages, chapters };
+}
+
+// ---------------------------------------------------------------------------
+// Fixed progress totals
+// ---------------------------------------------------------------------------
+
+export interface ProgressTotal {
+  counter: string;
+  total: string;
+  value: number;
+  /** How much each page adds to the counter. */
+  increments: Map<string, number>;
+}
+
+/**
+ * Pairs of (counter, total) where pages add to the counter and it's compared with a
+ * variable declared with a fixed numeric default, e.g.
+ *   Varprogress_track.add('1')                                  (on each page)
+ *   Varprogress_track.lessThan(Vara_progress_total.getValue())  (dashboard)
+ *   Vara_progress_total = new Variable( 'Vara_progress_total', '379', … )
+ */
+export function findProgressTotals(files: FileMap): ProgressTotal[] {
+  const increments = new Map<string, Map<string, number>>();
+  const compared = new Map<string, Set<string>>();
+  const defaults = new Map<string, number>();
+  const ADD = /\b(Var\w+)\.add\(\s*['"](\d+)['"]\s*\)/g;
+  const CMP = /\b(Var\w+)\.(?:lessThan|lessThanEqual|greaterThan|greaterThanEqual|equals)\(\s*(Var\w+)\.getValue\(\)\s*\)/g;
+  const DECL = /\b(Var\w+)\s*=\s*new\s+Variable\(\s*['"]\1['"]\s*,\s*['"](\d+)['"]/g;
+  for (const [f, bytes] of Object.entries(files)) {
+    if (!/\.(html?|js)$/i.test(f)) continue;
+    const text = textOf(bytes);
+    for (const m of text.matchAll(ADD)) {
+      if (!increments.has(m[1])) increments.set(m[1], new Map());
+      const per = increments.get(m[1])!;
+      per.set(f, (per.get(f) ?? 0) + Number(m[2]));
+    }
+    for (const m of text.matchAll(CMP)) {
+      if (!compared.has(m[1])) compared.set(m[1], new Set());
+      compared.get(m[1])!.add(m[2]);
+    }
+    for (const m of text.matchAll(DECL)) if (!defaults.has(m[1])) defaults.set(m[1], Number(m[2]));
+  }
+  const out: ProgressTotal[] = [];
+  for (const [counter, totals] of compared) {
+    const per = increments.get(counter);
+    if (!per) continue;
+    for (const total of totals) {
+      const value = defaults.get(total);
+      // A total nothing ever changes: only its declared default matters.
+      if (value === undefined || increments.has(total)) continue;
+      out.push({ counter, total, value, increments: per });
+    }
+  }
+  return out;
+}
+
+/** Lower a fixed total wherever it's written: its declared default, and progress bars sized to it. */
+function retargetTotal(text: string, counter: string, total: string, before: number, after: number): string {
+  let out = text.replace(
+    new RegExp(`(\\b${reEscape(total)}\\s*=\\s*new\\s+Variable\\(\\s*['"]${reEscape(total)}['"]\\s*,\\s*['"])${before}(['"])`, 'g'),
+    `$1${after}$2`,
+  );
+  // Progress bars whose range was sized to the total (Lectora: new ObjProgress(…, min, max, …)).
+  if (out.includes(counter) || out.includes(total)) {
+    out = out.replace(/^.*new\s+ObjProgress\(.*$/gm, (line) => line.replace(new RegExp(`,(\\s*\\d+\\s*),(\\s*)${before}(\\s*),`), `,$1,$2${after}$3,`));
+  }
+  // Direct comparisons with the number: Varprogress_track.lessThan('379').
+  out = out.replace(new RegExp(`(\\b${reEscape(counter)}\\.(?:lessThan|lessThanEqual|greaterThan|greaterThanEqual|equals)\\(\\s*['"])${before}(['"])`, 'g'), `$1${after}$2`);
+  return out;
 }
 
 /**

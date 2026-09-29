@@ -273,3 +273,15 @@ button.linkish { border: 0; background: none; padding: 0; color: var(--accent); 
 .tree-row.marked { background: #fde7e4; }
 .tree-row.marked.selected { background: #f6d2cc; }
 .plan .finishable { background: #e9f5ee; border-color: #bfe3cc; }
+kbd { font: 11px/1 ui-monospace, monospace; padding: 1px 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; background: #fff; color: var(--muted); margin-left: 4px; }
+.asset-extra { grid-column: 1 / -1; }
+.asset-extra.specs summary { cursor: pointer; color: var(--accent); }
+.media-player { display: grid; gap: 4px; }
+.media-player video, .media-player audio { width: 100%; max-height: 180px; border-radius: 4px; background: #000; }
+.media-player audio { background: transparent; height: 32px; }
+.image-specs { display: grid; gap: 6px; padding-top: 4px; }
+.image-specs dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+.image-specs dt { color: var(--muted); }
+.image-specs dd { margin: 0; }
+.image-specs p { margin: 0; }
+.image-specs button { justify-self: start; }

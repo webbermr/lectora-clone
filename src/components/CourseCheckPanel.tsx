@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { checkCourse, type CheckResult } from '../lib/courseCheck';
+import { openTests } from '../lib/lectoraTest';
 import { store, useStore } from '../lib/store';
 import { CheckList } from './CheckList';
 
@@ -15,7 +16,7 @@ export function CourseCheckPanel() {
     // Let "Checking…" paint first; a big course takes a moment.
     setTimeout(() => {
       const p = store.project!;
-      setResult(checkCourse(p.files, p.manifest));
+      setResult(checkCourse(p.files, p.manifest, openTests(p.files)));
       setRanAt(Date.now());
       setBusy(false);
     }, 30);

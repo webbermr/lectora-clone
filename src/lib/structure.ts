@@ -6,8 +6,9 @@
  */
 import { flattenItems, type ItemNode, type ManifestModel } from './manifest';
 import { referencedAssets } from './assetRefs';
+import { tocTitles } from './lectora';
 import type { FileMap } from './package';
-import { splitQuery } from './paths';
+import { basename, splitQuery } from './paths';
 
 export interface FileIndex {
   /** Files each item uses, including its dependencies and, for modules, its children's. */
@@ -116,6 +117,12 @@ export function inferLectoraStructure(manifest: ManifestModel, files: FileMap): 
     return { path, au: m[1], tokens: m[2].split('_').filter(Boolean) };
   });
   const titles = pageTitles(ordered, files);
+  // The table of contents has the names the author typed; prefer them over file-name guesses.
+  const toc = tocTitles(files);
+  for (const [page, t] of toc.pages) {
+    const path = ordered.find((p) => basename(p) === page);
+    if (path) titles.set(path, t);
+  }
 
   // Chapters: consecutive runs sharing the first name token (within one AU).
   const runs: (typeof pages)[] = [];
@@ -156,7 +163,8 @@ export function inferLectoraStructure(manifest: ManifestModel, files: FileMap): 
         i++;
       }
     }
-    return { identifier: `lectora:mod:${name}:${modulesKey(run)}`, title: prettify(name), query: '', children };
+    const tocName = run.map((p) => toc.chapters.get(basename(p.path))).find(Boolean);
+    return { identifier: `lectora:mod:${name}:${modulesKey(run)}`, title: tocName ?? prettify(name), query: '', children };
   });
 
   // File ownership from each page's references.

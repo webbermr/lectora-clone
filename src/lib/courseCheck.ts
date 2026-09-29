@@ -3,7 +3,8 @@
  * when played. Run it any time, and automatically after deleting pages.
  */
 import { textOf } from './assetRefs';
-import { readLectoraCourse, TRACKING_FILE, trackedPages } from './lectora';
+import { findProgressTotals, readLectoraCourse, TRACKING_FILE, trackedPages } from './lectora';
+import { testPages, type openTests } from './lectoraTest';
 import type { ManifestModel } from './manifest';
 import type { FileMap } from './package';
 import { basename, isHtmlFile, isTextFile, resolveFrom } from './paths';
@@ -29,17 +30,25 @@ const NEXT_FN = /function\s+trivNextPage\s*\(\s*\)\s*\{\s*trivExitPage\(\s*['"](
 const PREV_FN = /function\s+trivPrevPage\s*\(\s*\)\s*\{\s*trivExitPage\(\s*['"]([^'"]+)['"]/;
 // Quoted page names used as links: trivExitPage('x.html'), href="x.html", location = 'x.html'.
 const PAGE_REF = /['"]([^'"\s<>()]+?\.html?)(?:[?#][^'"]*)?['"]/gi;
+const RUNTIME_FILE = /^(trivantis[\w.-]*|jquery[\w.-]*|mediaelement[\w.-]*|es6-promise[\w.-]*|enc|aria-utils|apiwrapper\w*|scofunctions|dialog|trivantis-player)\.js$/i;
 const IGNORE_REF = /^(https?:|mailto:|javascript:|data:|\/\/)|\+/i;
 
-export function checkCourse(files: FileMap, manifest: ManifestModel | null): CheckResult {
+export function checkCourse(files: FileMap, manifest: ManifestModel | null, tests?: ReturnType<typeof openTests>): CheckResult {
   const issues: Issue[] = [];
   const add = (severity: Severity, kind: string, message: string, file?: string) => issues.push({ severity, kind, message, file });
   const pages = Object.keys(files).filter(isHtmlFile);
 
   // --- Links to pages that don't exist ----------------------------------------
+  // The authoring tool's own player code (Lectora's trivantis*.js, jQuery, the SCORM
+  // wrapper) mentions internal names like cookie keys and a debug window that learners
+  // never navigate to, so only the course's own pages and data files are checked.
+  const runtime = new Set([
+    ...(manifest?.resources ?? []).filter((r) => /^S_/.test(r.identifier)).flatMap((r) => r.files),
+    ...Object.keys(files).filter((f) => RUNTIME_FILE.test(basename(f))),
+  ]);
   const broken = new Map<string, Set<string>>();
   for (const f of Object.keys(files)) {
-    if (!/\.(html?|js)$/i.test(f) || f.includes('__lc_edit__')) continue;
+    if (!/\.(html?|js)$/i.test(f) || f.includes('__lc_edit__') || runtime.has(f)) continue;
     const text = textOf(files[f]);
     PAGE_REF.lastIndex = 0;
     for (let m = PAGE_REF.exec(text); m; m = PAGE_REF.exec(text)) {
@@ -109,6 +118,36 @@ export function checkCourse(files: FileMap, manifest: ManifestModel | null): Che
         'Page count',
         `Lectora's page count (numPages) is ${course.tracking.numPages}; ${content} content pages and ${tracked.length - content} test pages are tracked. Lectora counts pages its own way, so these needn't match. When pages are deleted, numPages drops by the number of content pages removed, keeping the difference the same as when the course was published.`,
         TRACKING_FILE,
+      );
+    }
+  }
+
+  // --- Tests ---------------------------------------------------------------------------
+  if (tests && 'xml' in tests) {
+    for (const [file, xml] of tests.xml) {
+      const missing = testPages(xml).filter((p) => !files[p] && !Object.keys(files).some((f) => basename(f) === basename(p)));
+      if (missing.length) {
+        add('error', 'Test', `The test lists ${missing.length} page(s) that aren't in the package (${missing.slice(0, 3).join(', ')}). It may stop or score wrongly when it reaches them.`, file);
+      }
+      for (const sec of xml.match(/<section>[\s\S]*?<\/section>/g) ?? []) {
+        const draw = Number(/<numrandom>(\d+)<\/numrandom>/.exec(sec.slice(0, sec.search(/<page[\s>]/)))?.[1] ?? 0);
+        const have = (sec.match(/<page[\s>]/g) ?? []).length;
+        if (draw > have) add('error', 'Test', `A test section draws ${draw} questions but only has ${have}.`, file);
+      }
+    }
+  } else if (tests && 'error' in tests) {
+    add('info', 'Test', tests.error);
+  }
+
+  // --- Fixed progress totals the pages can no longer reach ---------------------------
+  for (const t of findProgressTotals(files)) {
+    const reachable = [...t.increments].filter(([f]) => files[f] && isHtmlFile(f)).reduce((n, [, v]) => n + v, 0);
+    if (reachable < t.value) {
+      add(
+        'error',
+        'Progress can’t reach 100%',
+        `Pages add up to ${reachable} on ${t.counter}, but ${t.total} expects ${t.value}. Learners will never see 100% progress (or anything that waits for it). Deleting pages with this app lowers ${t.total} automatically.`,
+        [...t.increments.keys()].find((f) => /dashboard/i.test(f)),
       );
     }
   }

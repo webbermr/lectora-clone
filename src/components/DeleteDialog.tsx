@@ -79,6 +79,59 @@ export function DeleteDialog() {
                 </details>
               )}
             </section>
+            {plan.progressTotals.length > 0 && (
+              <section className="finishable">
+                <h4>📈 Course progress total lowered</h4>
+                <ul className="plain-list small">
+                  {plan.progressTotals.map((t) => (
+                    <li key={t.total}>
+                      <span className="mono">{t.total}</span>: {t.before} → <b>{t.after}</b>. The deleted pages each counted toward{' '}
+                      <span className="mono">{t.counter}</span>, so without this, progress could never reach 100%.
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {plan.tests.length > 0 && (
+              <section className="finishable">
+                <h4>📝 Test updated (and re-encrypted)</h4>
+                <ul className="plain-list small">
+                  {plan.tests.map((t) => (
+                    <li key={t.file}>
+                      {t.questionsRemoved} question{t.questionsRemoved === 1 ? '' : 's'} removed from the test
+                      {t.sectionsRemoved.length ? `; ${t.sectionsRemoved.length} section${t.sectionsRemoved.length > 1 ? 's' : ''} removed (no questions left)` : ''}.
+                      {t.numrandom.map((n) => (
+                        <div key={n.section}>A section that drew {n.before} random questions now draws {n.after}, all it has left.</div>
+                      ))}
+                      {t.relinked.map((r) => (
+                        <div key={r.setting}>
+                          The test's {{ passdone: 'pass', cancelfail: 'fail', prevpage: 'back' }[r.setting] ?? r.setting} page was deleted; it now goes to{' '}
+                          <span className="mono">{r.to}</span>.
+                        </div>
+                      ))}
+                      <div>
+                        Questions per attempt: {t.drawn.before} → <b>{t.drawn.after}</b>. The file stays encrypted, so learners still can't read the answers.
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {plan.toc.length > 0 && (
+              <section>
+                <h4>📑 Table of contents updated</h4>
+                <ul className="plain-list small">
+                  {plan.toc.map((t) => (
+                    <li key={t.file}>
+                      {t.entriesRemoved} entr{t.entriesRemoved === 1 ? 'y' : 'ies'} removed
+                      {t.chaptersRemoved.length ? `; chapter${t.chaptersRemoved.length > 1 ? 's' : ''} ${t.chaptersRemoved.map((c) => `“${c}”`).join(', ')} removed (no pages left)` : ''}
+                      {t.relinked.length ? `; ${t.relinked.map((c) => `“${c}”`).join(', ')} now open${t.relinked.length === 1 ? 's' : ''} at its first remaining page` : ''}
+                      <span className="muted mono"> ({basename(t.file)})</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <section>
               <h4>📋 Tracking &amp; manifest updated</h4>
               <ul className="plain-list small">

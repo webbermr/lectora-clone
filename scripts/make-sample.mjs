@@ -1,6 +1,7 @@
 // Builds small SCORM 1.2 and 2004 packages in samples/ for trying the editor.
 import JSZip from 'jszip';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import CryptoJS from 'crypto-js';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 
 // A 64x64 solid-colour PNG, built by hand so the samples have a real image.
@@ -218,7 +219,18 @@ document.getElementById('stage').style.backgroundImage = "url('images/bg_paper.p
 var spacer = new ObjImage('spacer1', 0, 0, 1, 'images/trans.gif');
 spacer.build();
 // Narration is only created when an action plays it, so it is not on screen at load.
-var audio1 = { id: 'audio1', src: 'media/welcome_narration.mp3' };`));
+var audio1 = { id: 'audio1', src: 'media/welcome_narration.mp3' };
+var chime = { id: 'audio2', src: 'media/chime.wav' };`));
+// A real, playable half-second chime (16-bit mono PCM WAV).
+zip3.file('media/chime.wav', (() => {
+  const rate = 8000, n = rate / 2, data = Buffer.alloc(n * 2);
+  for (let i = 0; i < n; i++) data.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 880 * i) / rate) * 8000 * (1 - i / n)), i * 2);
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8); h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(rate, 24);
+  h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(data.length, 40);
+  return Buffer.concat([h, data]);
+})());
 zip3.file('images/bg_paper.png', png(250, 246, 236));
 zip3.file('images/trans.gif', Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
 // Not real audio; the asset list only needs the file to exist.
@@ -329,6 +341,15 @@ ${pages.map((p) => `    <resource identifier="R_${p.id}" type="webcontent" adlcp
   for (const m of modules) {
     m.pages.forEach((p, i) => pages.push({ file: `a001_${m.slug}_${p}.html`, id: nextId++, module: m, title: p.replace(/_/g, ' '), last: i === m.pages.length - 1 }));
   }
+  // A Lectora-style test: sections of question pages plus a results page.
+  const testSections = [
+    { id: 710, slug: 'module_1', draw: 2, questions: ['q1', 'q2', 'q3'] },
+    { id: 720, slug: 'module_2', draw: 0, questions: ['q1', 'q2'] },
+  ];
+  for (const sec of testSections) {
+    sec.questions.forEach((q, i) => pages.push({ file: `a001_test_${sec.slug}_${q}.html`, id: 7000 + sec.id + i, module: null, test: sec, title: `Question ${i + 1}` }));
+  }
+  pages.push({ file: 'a001_test_test_results.html', id: 790, module: null, test: true, title: 'Test Results' });
   pages.push({ file: 'a001_final_assessment_begin.html', id: 900, module: null, title: 'Final Assessment' });
   const idx = (f) => pages.findIndex((p) => p.file === f);
   const runtime = `// Minimal stand-in for Lectora's runtime, for this sample only.
@@ -336,7 +357,12 @@ function Variable(name, def) { this.name = name; this.def = def; }
 Variable.prototype.getValue = function () { var v = sessionStorage.getItem(this.name); return v === null ? this.def : v; };
 Variable.prototype.set = function (v) { sessionStorage.setItem(this.name, String(v)); };
 Variable.prototype.equals = function (v) { return this.getValue() == v; };
+Variable.prototype.add = function (n) { this.set(Number(this.getValue()) + Number(n)); };
+Variable.prototype.lessThan = function (v) { return Number(this.getValue()) < Number(v); };
+function ObjProgress(name, alt, x, y, w, h, vis, z, a, b, c, d, e, f, min, max) { this.name = name; this.min = min; this.max = max; }
 function trivExitPage(page) { location.href = page; }
+// Like Lectora's runtime, this names a debug window learners never open.
+function trivDebug() { window.open('trivantisdebug.html'); }
 `;
   const tracking = (tree, numPages) => `function PageTrackingObj() { this.numPages = 0; this.title = null; }
 PageTrackingObj.prototype.find = function (n, id) { if (n.id == id) return n; for (var i = 0; n.c && i < n.c.length; i++) { var m = this.find(n.c[i], id); if (m) return m; } return null; };
@@ -348,8 +374,11 @@ trivPageTracking.publishTimeStamp = 2026101012000;
 
 trivPageTracking.title=${tree};
 `;
-  const tree = `{id:1,v:0,c:[{id:100,v:0},${modules.map((m) => `{id:${m.id},v:0,c:[${pages.filter((p) => p.module === m).map((p) => `{id:${p.id},v:0}`).join(',')}]}`).join(',')},{id:900,v:0}]}`;
+  const testTree = `{id:700,v:0,t:1,c:[${testSections.map((sec) => `{id:${sec.id},v:0,c:[${pages.filter((p) => p.test === sec).map((p) => `{id:${p.id},v:0}`).join(',')}]}`).join(',')},{id:790,v:0}]}`;
+  const tree = `{id:1,v:0,c:[{id:100,v:0},${modules.map((m) => `{id:${m.id},v:0,c:[${pages.filter((p) => p.module === m).map((p) => `{id:${p.id},v:0}`).join(',')}]}`).join(',')},${testTree},{id:900,v:0}]}`;
   const numPages = pages.length;
+  const progressPages = pages.filter((p) => p.module);
+  const progressTotal = progressPages.length;
   const pageHtml = (p) => {
     const i = idx(p.file);
     const prev = pages[i - 1]?.file;
@@ -360,7 +389,16 @@ trivPageTracking.title=${tree};
       body = `<h1>Dashboard</h1>
 <ul>${modules.map((m) => `<li><a href="#" onclick="trivExitPage('a001_${m.slug}_welcome.html', true); return false;">${m.title}</a> <span id="st${m.id}"></span></li>`).join('')}</ul>
 <button id="final" onclick="action_final()">Final Assessment</button> <span id="lock"></span>
+<p>Course progress: <b id="pct"></b> · <a href="#" onclick="trivExitPage('a001_toc1.html', true); return false;">Table of contents</a> · <a href="resources/Safety%20Handbook.pdf">Handbook (PDF)</a></p>
 <script>
+Varprogress_track = new Variable( 'Varprogress_track', '0' )
+Vara_progress_total = new Variable( 'Vara_progress_total', '${progressTotal}' )
+progress1 = new ObjProgress('progress1','',57,355,322,22,0,22,1,29,'#0000ff','','#405d87','',1,${progressTotal},0,0,0,1,0,'div',0 )
+function showProgress() {
+  var pct = Varprogress_track.lessThan(Vara_progress_total.getValue()) ? Math.round(100 * Varprogress_track.getValue() / Vara_progress_total.getValue()) : 100;
+  document.getElementById('pct').textContent = pct + '%';
+}
+showProgress();
 ${modules.map((m) => `var VarModule${m.id}Done = new Variable('VarModule${m.id}Done', '0');`).join('\n')}
 function action_final() {
   if (${modules.map((m) => `VarModule${m.id}Done.equals('1')`).join(' && ')}) trivExitPage('a001_final_assessment_begin.html', true);
@@ -373,6 +411,10 @@ ${modules.map((m) => `document.getElementById('st${m.id}').textContent = VarModu
 <p>Sample text for ${p.title}.</p>
 <img src="${img}" alt="" width="120">
 <p><button onclick="trivPrevPage()">Back</button> <button onclick="trivNextPage()">Next</button></p>
+${p.module ? `<script>
+var Varprogress_track = new Variable('Varprogress_track', '0');
+if (!sessionStorage.getItem('seen_${p.id}')) { sessionStorage.setItem('seen_${p.id}', '1'); Varprogress_track.add('1'); }
+</script>` : ''}
 ${p.last ? `<script>var VarModule${p.module.id}Done = new Variable('VarModule${p.module.id}Done', '0'); VarModule${p.module.id}Done.set('1');</script>` : ''}`;
     }
     return `<!DOCTYPE html>
@@ -423,16 +465,110 @@ ${p.file === 'a001_student_dashboard.html' ? pages.filter((q) => q !== p).map((q
     <resource identifier="R_images" type="webcontent" adlcp:scormtype="asset">
 ${allImages.map((f) => `      <file href="${f}"/>`).join('\n')}
     </resource>
+    <resource identifier="T_700" type="webcontent" adlcp:scormtype="asset">
+      <file href="_tobj700.txt"/>
+    </resource>
+    <resource identifier="F_1" type="webcontent" adlcp:scormtype="asset">
+      <file href="a001_toc1.html"/>
+    </resource>
+    <resource identifier="R_extern" type="webcontent" adlcp:scormtype="asset">
+      <file href="resources/Safety%20Handbook.pdf"/>
+    </resource>
     <resource identifier="S_BaseFiles" type="webcontent" adlcp:scormtype="asset">
       <file href="trivantis.js"/>
       <file href="trivantis-pagetracking.js"/>
+      <file href="trivantis-titlemgr.js"/>
+      <file href="enc.js"/>
       <file href="js/scorm.js"/>
     </resource>
   </resources>
 </manifest>
 `;
+  const esc = (t) => JSON.stringify(t.replace(/(^|_)(\w)/g, (_, a, b) => (a ? ' ' : '') + b.toUpperCase()));
+  const toc = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Table of Contents</title>
+<script src="trivantis.js"></script>
+<script>
+function insertEntry(f, e) { f.items.push(e); } function insertFolder(f, g) { f.items.push(g); return g; }
+function NewFolder(t, h) { return { t: t, h: h, items: [] }; } function NewLink(t, h) { return { t: t, h: h }; }
+  fT = NewFolder("<i>Table Of Contents</i>", "", null)
+  insertEntry(fT, NewLink("Student Dashboard", "a001_student_dashboard.html", "page", 100))
+${modules.map((m) => `  aux1 = insertFolder(fT, NewFolder(${JSON.stringify(m.title)}, "a001_${m.slug}_welcome.html", "chap", ${m.id}))
+${pages.filter((p) => p.module === m).map((p) => `  insertEntry(aux1, NewLink(${esc(p.title.replace(/ /g, '_'))}, "${p.file}", "page", ${p.id}))`).join('\n')}`).join('\n')}
+  aux1 = insertFolder(fT, NewFolder("Final Assessment", "a001_final_assessment_begin.html", "chap", 800))
+  insertEntry(aux1, NewLink("Begin Final Assessment", "a001_final_assessment_begin.html", "page", 900))
+document.write(fT.items.map(function (x) { return x.items ? '<h3><a href="' + x.h + '">' + x.t + '</a></h3>' + x.items.map(function (e) { return '<div><a href="' + e.h + '">' + e.t + '</a></div>'; }).join('') : '<div><a href="' + x.h + '">' + x.t + '</a></div>'; }).join(''));
+</script>
+</head><body style="font-family:Arial,sans-serif;padding:24px"></body>
+</html>
+`;
   const z = new JSZip();
   z.file('imsmanifest.xml', manifest);
+  z.file('a001_toc1.html', toc);
+  const testXml = `<?xml version="1.0" encoding="UTF-8"?>
+<lectoratest>
+<grade>1</grade>
+<name>Knowledge Check</name>
+<numrandom>0</numrandom>
+<passinggrade>80</passinggrade>
+<cancelfail>a001_student_dashboard.html</cancelfail>
+<passdone>a001_final_assessment_begin.html</passdone>
+<prevpage>a001_student_dashboard.html</prevpage>
+${(() => {
+    let idx = 0;
+    return testSections.map((sec) => {
+      const first = idx;
+      const qs = pages.filter((p) => p.test === sec).map((p, i) => `<page>
+<index>${idx++}</index>
+<name>${p.file}</name>
+<question>
+<id>${p.id}0</id>
+<type>2</type>
+<weight>1</weight>
+<name>Q_${sec.slug}_${i + 1}</name>
+<var>VarQ_${sec.slug}_${i + 1}</var>
+<text>Sample question ${i + 1} for ${sec.slug}?</text>
+<arcorrectans><answer>Yes</answer></arcorrectans>
+<archoices><choice>Yes</choice><choice>No</choice></archoices>
+</question>
+</page>`).join('\n');
+      return `<section>
+<index>${first}</index>
+<id>${sec.id}</id>
+<numrandom>${sec.draw}</numrandom>
+${qs}
+</section>`;
+    }).join('\n') + `
+<page hasResults = "true">
+<index>${idx}</index>
+<name>a001_test_test_results.html</name>
+</page>`;
+  })()}
+</lectoratest>
+`;
+  // Sample-only passphrase: Lectora's real key is never stored in this project.
+  const SAMPLE_KEY = 'lectora-clone-sample';
+  z.file('_tobj700.txt', CryptoJS.AES.encrypt(testXml, SAMPLE_KEY).toString());
+  z.file('enc.js', `var CJ = (function () { var module = { exports: {} }; var exports = module.exports;
+${readFileSync('node_modules/crypto-js/crypto-js.js', 'utf8')}
+return module.exports; })();
+CJ.AES.dct = CJ.AES.decrypt;
+`);
+  z.file('trivantis-titlemgr.js', `// Stand-in for Lectora's title manager, for this sample only.
+function TitleMgr() {}
+var TMPr = TitleMgr.prototype;
+var hlf = CJ.AES.dct;
+var utf8 = CJ.enc.Utf8;
+
+//LD-5993
+TMPr.bDc = function(str) {
+  var rur  = hlf(str, '${SAMPLE_KEY}');
+  var ret = rur.toString(utf8);
+  return ret;
+}
+`);
+  z.file('resources/Safety Handbook.pdf', '%PDF-1.4 placeholder');
   z.file('a001index.html', `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Player</title><script>location.replace('a001_student_dashboard.html');</script></head><body></body></html>`);
   z.file('trivantis.js', runtime);
   z.file('trivantis-pagetracking.js', tracking(tree, numPages));
