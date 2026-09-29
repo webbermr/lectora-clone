@@ -12,6 +12,7 @@ import { store, type FileChange } from './store';
 import { encodeText } from './text';
 import { referencedAssets, textOf } from './assetRefs';
 import { vfsUrl } from './vfs';
+import { REMOVED_STYLE_ID, hiddenIds, removedCss, setHidden } from './removeObjects';
 
 export type LiveMode = 'select' | 'interact';
 
@@ -221,6 +222,63 @@ class LiveSession {
           (el as HTMLElement).style.backgroundImage = `url("${bust(vfsUrl(store.project!.id, path))}")`;
         }
       }
+    }
+  }
+
+  // ---- removing objects (see removeObjects.ts: they're hidden by id, so page scripts keep working) ----
+
+  /** Hide objects on pages: page path → ids. One undo step. */
+  async removeObjects(label: string, byPage: Map<string, string[]>) {
+    const files = store.project!.files;
+    const writes: FileChange[] = [];
+    for (const [page, ids] of byPage) {
+      const html = textOf(files[page]);
+      const next = setHidden(html, [...hiddenIds(html), ...ids]);
+      if (next !== html) writes.push({ path: page, bytes: encodeText(next) });
+    }
+    await store.write(label, writes, { fromStage: true });
+    this.syncRemoved();
+    const pages = byPage.size;
+    store.setStatus(`${label}${pages > 1 ? ` on ${pages} pages` : ''}. Undo with Ctrl+Z (⌘Z), or restore it from the page assets panel.`);
+    this.emit();
+  }
+
+  /** Show a removed object again on the given pages. */
+  async restoreObject(id: string, pages: string[]) {
+    const files = store.project!.files;
+    const writes: FileChange[] = [];
+    for (const page of pages) {
+      const html = textOf(files[page]);
+      const next = setHidden(html, hiddenIds(html).filter((x) => x !== id));
+      if (next !== html) writes.push({ path: page, bytes: encodeText(next) });
+    }
+    await store.write(`Restore ${id}`, writes, { fromStage: true });
+    this.syncRemoved();
+    this.emit();
+  }
+
+  /**
+   * Make the running page match what its source hides (after a removal, restore, undo or redo)
+   * without reloading it, so the learner's place in the course is kept.
+   */
+  syncRemoved() {
+    const files = store.project?.files;
+    if (!files) return;
+    for (const doc of this.liveDocs()) {
+      const page = this.pathFromUrl(doc.location.href);
+      if (!page || !files[page] || !isHtmlFile(page)) continue;
+      const css = removedCss(hiddenIds(textOf(files[page])));
+      // The page may have loaded with an older copy of the rules baked in; keep that one current too.
+      const baked = doc.getElementById(REMOVED_STYLE_ID);
+      if (baked && baked.textContent !== css) baked.textContent = css;
+      let tag = doc.getElementById('lc-removed-live');
+      if (!tag) {
+        if (!css) continue;
+        tag = doc.createElement('style');
+        tag.id = 'lc-removed-live';
+        (doc.head ?? doc.documentElement).appendChild(tag);
+      }
+      if (tag.textContent !== css) tag.textContent = css;
     }
   }
 

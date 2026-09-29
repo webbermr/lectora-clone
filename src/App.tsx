@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { undoShortcut } from './lib/undoKeys';
 import { CodeView } from './components/CodeView';
 import { DeleteDialog } from './components/DeleteDialog';
 import { EditStage, handleEditorKey } from './components/EditStage';
@@ -18,7 +19,8 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (s.project && s.view === 'edit' && handleEditorKey(e)) e.preventDefault();
+      if (!s.project) return;
+      if (s.view === 'edit' ? handleEditorKey(e) : undoShortcut(e)) e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

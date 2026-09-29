@@ -5,6 +5,8 @@ import { basename, dirname, extname, isImageFile } from '../lib/paths';
 import { visibleText } from '../lib/sourceMatch';
 import { store, useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
+import { textOf } from '../lib/assetRefs';
+import { declaredObjects, hiddenIds, navigatesAway, objectRoot, pagesWithObject } from '../lib/removeObjects';
 
 /** Properties for the element selected in Live edit. */
 export function LivePanel() {
@@ -38,6 +40,8 @@ function Selected({ el }: { el: Element }) {
           <button onClick={() => live.select(null)}>Deselect</button>
         </div>
       </div>
+
+      <RemoveObject el={el} />
 
       {asset && (
         <details className="section" open>
@@ -88,6 +92,138 @@ function Selected({ el }: { el: Element }) {
         )
       )}
     </>
+  );
+}
+
+const KIND_NAME: Record<string, string> = { ObjButton: 'button', ObjImage: 'shape or image', ObjText: 'text block', ObjInline: 'object', ObjScroll: 'scrolling panel', ObjProgress: 'progress bar', ObjMedia: 'media player', ObjGroup: 'group' };
+
+/** Remove the whole object the selection belongs to: here, on every page that has it, and what sits on it. */
+function RemoveObject({ el }: { el: Element }) {
+  const s = useStore();
+  const doc = el.ownerDocument;
+  const page = live.pathFromUrl(doc.location.href);
+  const files = s.project!.files;
+  const html = page && files[page] ? textOf(files[page]) : '';
+  const declared = useMemo(() => declaredObjects(html), [html]);
+  const root = useMemo(() => (page ? objectRoot(el, declared) : null), [el, declared, page]);
+  const [scope, setScope] = useState<'page' | 'all'>('page');
+  const [withCovered, setWithCovered] = useState(true);
+  const pages = useMemo(() => (root ? pagesWithObject(files, root.id) : []), [root, files]);
+  // Objects sitting on top of this one (a callout's text, an arrow's label) usually go with it.
+  const covered = useMemo(() => {
+    if (!root) return [];
+    const r = root.getBoundingClientRect();
+    if (!r.width || !r.height) return [];
+    return [...declared.values()].filter((o) => {
+      const e = doc.getElementById(o.id);
+      if (!e || e === root || root.contains(e) || e.contains(root)) return false;
+      const b = e.getBoundingClientRect();
+      if (!b.width || !b.height || doc.defaultView?.getComputedStyle(e).display === 'none') return false;
+      return b.left >= r.left - 2 && b.top >= r.top - 2 && b.right <= r.right + 2 && b.bottom <= r.bottom + 2;
+    });
+  }, [root, declared, doc]);
+
+  if (!page) return null;
+  if (!root) {
+    return (
+      <details className="section">
+        <summary>Remove</summary>
+        <p className="hint">This element has no id, so it can't be removed on its own. Try Parent to pick the object around it.</p>
+      </details>
+    );
+  }
+  const info = declared.get(root.id);
+  const label = info?.name ? `"${info.name}"` : root.id;
+  const kind = info ? KIND_NAME[info.kind] ?? 'object' : 'element';
+  const nav = navigatesAway(html, root.id);
+  const others = pages.filter((p) => p !== page);
+  const ids = [root.id, ...(withCovered ? covered.map((c) => c.id) : [])];
+
+  const remove = async () => {
+    const byPage = new Map<string, string[]>();
+    for (const p of scope === 'all' ? pages.length ? pages : [page] : [page]) {
+      // Only hide the covered objects on pages that actually have them.
+      const t = textOf(files[p]);
+      byPage.set(p, ids.filter((id) => id === root.id || p === page || new RegExp(`'${id}'`).test(t)));
+    }
+    live.select(null);
+    await live.removeObjects(`Remove ${label}`, byPage);
+  };
+
+  return (
+    <details className="section remove-object" open>
+      <summary>Remove from page</summary>
+      <div className="stack">
+        <p className="small">
+          {root === el ? 'This is' : 'Your selection is part of'} the {kind} <b>{label}</b> <span className="mono muted">({root.id})</span>.
+        </p>
+        {covered.length > 0 && (
+          <label className="check-row">
+            <input type="checkbox" checked={withCovered} onChange={(e) => setWithCovered(e.target.checked)} />
+            Also remove the {covered.length} object{covered.length === 1 ? '' : 's'} on top of it
+            <span className="muted small"> ({covered.map((c) => c.name || c.id).join(', ')})</span>
+          </label>
+        )}
+        {others.length > 0 && (
+          <div className="scope">
+            <label className="check-row">
+              <input type="radio" checked={scope === 'page'} onChange={() => setScope('page')} /> This page only
+            </label>
+            <label className="check-row">
+              <input type="radio" checked={scope === 'all'} onChange={() => setScope('all')} /> All {pages.length} pages that have it
+            </label>
+          </div>
+        )}
+        {nav && <p className="warn-text small">⚠ This button takes the learner to another page. If it's the only way forward, removing it can leave learners stuck.</p>}
+        <button className="danger" onClick={() => void remove()}>
+          🗑 Remove{scope === 'all' && others.length ? ` from ${pages.length} pages` : ''}
+        </button>
+        <p className="hint">It's hidden rather than cut out of the page's code, so the page's scripts keep working. Undo, or restore it from this panel with nothing selected.</p>
+      </div>
+    </details>
+  );
+}
+
+/** Objects removed from the page on screen, with a way back. */
+function RemovedObjects({ page }: { page: string | null }) {
+  const s = useStore();
+  const files = s.project!.files;
+  const html = page && files[page] ? textOf(files[page]) : '';
+  const ids = hiddenIds(html);
+  const declared = useMemo(() => declaredObjects(html), [html]);
+  // Every page each removed object is hidden on, for "restore everywhere".
+  const hiddenOn = useMemo(() => {
+    const out = new Map<string, string[]>();
+    if (!ids.length) return out;
+    for (const p of Object.keys(files)) {
+      if (!/\.html?$/i.test(p)) continue;
+      const t = textOf(files[p]);
+      if (!t.includes('id="lc-removed"')) continue;
+      for (const id of hiddenIds(t)) out.set(id, [...(out.get(id) ?? []), p]);
+    }
+    return out;
+  }, [files, ids.join(' ')]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!page || !ids.length) return null;
+  return (
+    <details className="section" open>
+      <summary>Removed on this page ({ids.length})</summary>
+      <ul className="removed-list">
+        {ids.map((id) => {
+          const where = hiddenOn.get(id) ?? [page];
+          return (
+            <li key={id}>
+              <span>{declared.get(id)?.name || id} <span className="mono muted small">{id}</span></span>
+              <button onClick={() => void live.restoreObject(id, [page])}>Restore</button>
+              {where.length > 1 && (
+                <button title={`Restore on all ${where.length} pages it was removed from`} onClick={() => void live.restoreObject(id, where)}>
+                  All {where.length}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 
@@ -171,6 +307,7 @@ function PageAssets() {
         ))}
         <button title="Scan the page again" onClick={() => rescan((n) => n + 1)}>⟳</button>
       </div>
+      <RemovedObjects page={pagePath} />
       {assets.length === 0 && <p className="hint">No images, video or audio found on this page yet.</p>}
       {(filter === 'all' ? kinds : [filter]).map((k) => {
         const group = shown.filter((a) => a.kind === k);

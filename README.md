@@ -121,6 +121,16 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   **Show** or **Replace** each one. Lectora's transparent spacer GIFs are left out
 - **Interact** mode lets you click through a single-page player to the screen you want.
   Press **S** for Select & edit and **I** for Interact (ignored while typing in a text box)
+- **Remove** callouts, buttons, images and other objects: select one and press 🗑 Remove in the
+  panel. A click on part of an object (an SVG path, a word) removes the whole object, shown with
+  Lectora's own name for it. Objects sitting on top of it (a callout's text) can go with it, and
+  objects that repeat on many pages (a Table of Contents button) can be removed from all of them
+  at once. Buttons that move the learner to another page get a warning first. Objects are hidden
+  with a rule in the page's own `<style id="lc-removed">` block rather than cut out of the code,
+  because the page's scripts still show, hide and animate them by id. With nothing selected, the
+  panel lists what's been removed on the page, with Restore buttons
+- Ctrl/⌘+Z and Ctrl/⌘+Y (or Shift+Z) undo and redo in every view, including while the Live edit
+  page has focus; text boxes keep their own undo
 - If the same text appears in several places, you pick which ones change
 - Edit view spots pages that are mostly script and offers to switch to Live edit
 
@@ -193,5 +203,6 @@ src/lib/scormApi.ts   preview LMS
 src/lib/sourceMatch.ts  find on-screen text in source, however it's encoded
 src/lib/live.ts       Live edit session (text write-back, asset replacement)
 src/lib/frameFollow.ts  Follows the page a Live edit / Preview frame has navigated to
+src/lib/removeObjects.ts  Hiding page objects by id (Live edit Remove / Restore)
 src/components/       React UI (ribbon, explorer, stage, properties)
 ```

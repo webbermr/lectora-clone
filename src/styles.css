@@ -298,3 +298,11 @@ kbd { font: 11px/1 ui-monospace, monospace; padding: 1px 4px; border: 1px solid 
 .selection-bar { position: sticky; top: -8px; z-index: 2; display: flex; gap: 6px; align-items: center; padding: 6px 8px; margin: -8px -8px 8px; background: #e4eefb; border-bottom: 1px solid #bcd3f2; }
 .file-row.marked { background: #e4eefb; box-shadow: inset 3px 0 0 var(--accent); }
 .file-row.marked.selected { background: #d3e3f8; }
+
+/* Live edit: removing objects */
+.remove-object .check-row { display: block; font-size: 12px; line-height: 1.4; }
+.remove-object .check-row input { margin: 0 6px 0 0; vertical-align: -2px; }
+.remove-object .scope { display: flex; flex-direction: column; gap: 2px; }
+.removed-list { list-style: none; margin: 0; padding: 0 8px 6px; display: flex; flex-direction: column; gap: 4px; }
+.removed-list li { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.removed-list li > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
