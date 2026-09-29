@@ -206,7 +206,7 @@ user's own browser (IndexedDB). The container only serves files, keeps no data a
 
 ```bash
 docker compose up -d --build        # or:
-docker build -t lectora-clone . && docker run -d -p 8080:8080 lectora-clone
+docker build -t scorm-editor . && docker run -d --name scorm-editor -p 127.0.0.1:8080:8080 scorm-editor
 ```
 
 Then open http://localhost:8080 on the same computer. `docker build --build-arg RUN_TESTS=true …` also
@@ -231,10 +231,10 @@ own certificate for your address. Each computer then trusts Caddy's root certifi
    Windows: *Windows Defender Firewall → Advanced settings → Inbound Rules → New Rule → Port → TCP 443*.
 4. **Copy out the root certificate** (it stays the same across restarts, so this is once per setup):
    ```bash
-   docker compose --profile https cp https:/data/caddy/pki/authorities/local/root.crt ./lectora-root.crt
+   docker compose --profile https cp https:/data/caddy/pki/authorities/local/root.crt ./scorm-editor-root.crt
    ```
 5. **Trust it on each computer that uses the editor** (yours too, if you'll use the HTTPS address):
-   - Windows: double-click `lectora-root.crt` → *Install Certificate* → *Local Machine* → *Place all
+   - Windows: double-click `scorm-editor-root.crt` → *Install Certificate* → *Local Machine* → *Place all
      certificates in the following store* → **Trusted Root Certification Authorities**. Restart the browser.
      (Chrome and Edge use this; so does Firefox with `security.enterprise_roots.enabled`.)
    - macOS: open it in *Keychain Access* → *System* keychain → double-click it → *Trust* → **Always Trust**.
@@ -246,22 +246,49 @@ can't be shown, and the editor says to install the certificate. Only trust this 
 use the editor; anyone holding Caddy's data volume could make certificates those computers accept.
 
 If your organisation already has certificates or an HTTPS proxy, use those instead of Caddy: point
-them at port 8080 of the `lectora-clone` container.
+them at port 8080 of the `scorm-editor` container.
 
 - It works at the site root or under a path
 - **HTTPS is required** anywhere but `localhost`. Course pages are shown through a service worker,
   and browsers only allow those over HTTPS. Put the container behind your usual HTTPS reverse proxy
   or load balancer (nginx, Caddy, Traefik, IIS, a cloud load balancer). Opened over plain HTTP from
   another machine, the editor says so instead of showing pages.
-- It works at the site root or under a path (`https://tools.example.com/lectora/`) with no rebuild;
-  have the proxy strip the path prefix (e.g. nginx `location /lectora/ { proxy_pass http://lectora:8080/; }`).
+- It works at the site root or under a path (`https://tools.example.com/scorm-editor/`) with no rebuild;
+  have the proxy strip the path prefix (e.g. nginx `location /scorm-editor/ { proxy_pass http://scorm-editor:8080/; }`).
 - The image is nginx serving the built files, running as a non-root user on port 8080, with a
   `/healthz` endpoint and a Docker health check. `docker-compose.yml` also runs it read-only.
 - Each user's projects live in their own browser on their own machine. Clearing browser data deletes
   them, and they don't move between computers, so publish a `.zip` as the backup and the way to hand
   a course to someone else.
-- Updating: rebuild and restart the container. `index.html` and `sw.js` are served uncached and the
-  other files have content-hashed names, so users get the new version on their next page load.
+- `index.html` and `sw.js` are served uncached and the other files have content-hashed names, so after
+  an update people get the new version on their next page load.
+
+### Getting updates
+
+On a computer that runs the editor from a `git clone` of this repository, run the update script in
+that folder. It pulls the latest code from GitHub, rebuilds the image and restarts the container.
+Saved projects are kept, since they live in the browser, not the container.
+
+- Windows (PowerShell): `powershell -ExecutionPolicy Bypass -File .\update.ps1`
+- macOS / Linux: `./update.sh`
+
+The first time, if the folder doesn't have the script yet, run `git pull` once and then the script.
+
+That's the same as running `git pull` and then `docker compose up -d --build --remove-orphans` by hand.
+The scripts also remove the container from before the app was renamed (`lectora-clone`), which
+would otherwise keep port 8080 busy.
+
+If you use the HTTPS setup, put its settings in a `.env` file next to `docker-compose.yml` so updates
+keep them:
+
+```
+COMPOSE_PROFILES=https
+SITE_ADDRESS=192.168.1.50
+```
+
+Without git, get the new image from whoever builds it: they run `docker compose build` and
+`docker save scorm-editor:latest -o scorm-editor.tar`; you run `docker load -i scorm-editor.tar` and
+then `docker compose up -d --no-build --remove-orphans` (or restart your `docker run` container).
 
 ## Development
 

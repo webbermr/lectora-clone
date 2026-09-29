@@ -5,3 +5,6 @@ dist
 Dockerfile
 docker-compose.yml
 .dockerignore
+.env
+update.sh
+update.ps1
