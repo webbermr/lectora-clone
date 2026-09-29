@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { undoShortcut } from './lib/undoKeys';
 import { CodeView } from './components/CodeView';
 import { DeleteDialog } from './components/DeleteDialog';
 import { EditStage, handleEditorKey } from './components/EditStage';
@@ -18,7 +19,8 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (s.project && s.view === 'edit' && handleEditorKey(e)) e.preventDefault();
+      if (!s.project) return;
+      if (s.view === 'edit' ? handleEditorKey(e) : undoShortcut(e)) e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -55,9 +57,9 @@ export function App() {
         <PropertiesPanel />
       </div>
       <footer className="statusbar">
-        <span>{s.status}</span>
+        <span className="status-msg" title={s.status}>{s.status}</span>
         <span className="spacer" />
-        <span>{s.currentPath}</span>
+        <span className="status-path">{s.viewingPath ?? s.currentPath}</span>
         <span className={'save-' + s.saveState}>
           {{ saved: '✓ Saved', saving: 'Saving…', dirty: 'Unsaved changes', error: '⚠ Save failed' }[s.saveState]}
         </span>

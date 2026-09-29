@@ -3,7 +3,7 @@
  * autosave. Components subscribe via useStore().
  */
 import { useSyncExternalStore } from 'react';
-import { parseManifest, type ManifestModel } from './manifest';
+import { flattenItems, parseManifest, type ManifestModel } from './manifest';
 import type { FileMap } from './package';
 import { bytesEqual, decodeText, encodeText } from './text';
 import { previewLms } from './scormApi';
@@ -37,6 +37,11 @@ class Store {
   /** Package path of the page/file open in the stage. */
   currentPath: string | null = null;
   currentItemId: string | null = null;
+  /**
+   * The page Live edit or Preview is actually showing, when the learner moved
+   * on inside the course (Next buttons, menus). Null while it's still currentPath.
+   */
+  viewingPath: string | null = null;
   view: View = 'edit';
   /** Bumped when a file changes from outside the stage, telling the stage to reload. */
   revisions: Record<string, number> = {};
@@ -77,6 +82,7 @@ class Store {
     this.revisions = {};
     this.currentPath = null;
     this.currentItemId = null;
+    this.viewingPath = null;
     this.view = 'edit';
     this.saveState = 'saved';
     const first = this.project.manifest?.items.length ? firstLaunchable(this.project.manifest.items) : undefined;
@@ -92,6 +98,7 @@ class Store {
     this.project = null;
     this.currentPath = null;
     this.currentItemId = null;
+    this.viewingPath = null;
     this.emit();
   }
 
@@ -149,6 +156,8 @@ class Store {
 
   private async apply(changes: FileChange[], bumpRevision: boolean) {
     const p = this.project!;
+    // A new object each time, so views that memoise on the file map see the change.
+    p.files = { ...p.files };
     for (const c of changes) {
       if (c.bytes) {
         p.files[c.path] = c.bytes;
@@ -161,6 +170,7 @@ class Store {
     }
     if (changes.some((c) => c.path === 'imsmanifest.xml')) this.reparseManifest();
     if (this.currentPath && !p.files[this.currentPath]) this.currentPath = null;
+    if (this.viewingPath && !p.files[this.viewingPath]) this.viewingPath = null;
     this.scheduleSave();
   }
 
@@ -185,10 +195,26 @@ class Store {
   openPage(path: string | null, itemId: string | null = null) {
     this.currentPath = path;
     this.currentItemId = itemId;
+    this.viewingPath = null;
+    this.emit();
+  }
+
+  /** Called by Live edit / Preview as the course navigates inside its frame. */
+  setViewing(path: string | null) {
+    const next = path === this.currentPath ? null : path;
+    if (next === this.viewingPath) return;
+    this.viewingPath = next;
     this.emit();
   }
 
   setView(view: View) {
+    // Switching views carries on from the page the course had reached.
+    if (this.viewingPath && view !== this.view) {
+      const path = this.viewingPath;
+      this.currentPath = path;
+      this.currentItemId = flattenItems(this.project?.manifest?.items ?? []).find((i) => i.href === path)?.identifier ?? null;
+      this.viewingPath = null;
+    }
     this.view = view;
     this.emit();
   }

@@ -3,8 +3,10 @@ import { live, textNodesOf, useLive } from '../lib/live';
 import { flattenItems } from '../lib/manifest';
 import { isHtmlFile } from '../lib/paths';
 import { previewLms } from '../lib/scormApi';
-import { useStore } from '../lib/store';
+import { store, useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
+import { useFollowFrame } from '../lib/frameFollow';
+import { undoShortcut } from '../lib/undoKeys';
 
 const LIVE_CSS =
   '[data-lc-live-hover]{outline:2px dashed #2f7de1!important;outline-offset:1px!important;cursor:pointer!important}' +
@@ -26,6 +28,7 @@ export function LiveStage({ width }: { width: string }) {
   const path = s.currentPath;
   const [nonce, setNonce] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  useFollowFrame(iframeRef, p.id);
 
   useEffect(() => {
     previewLms.install(window);
@@ -34,7 +37,10 @@ export function LiveStage({ width }: { width: string }) {
       if (modeShortcut(e)) e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
+    // Undo/redo of a removal changes the source; mirror it on the running page.
+    const unsub = store.subscribe(() => live.syncRemoved());
     return () => {
+      unsub();
       window.removeEventListener('keydown', onKey);
       live.select(null);
     };
@@ -47,6 +53,7 @@ export function LiveStage({ width }: { width: string }) {
     const scan = () => {
       const root = iframeRef.current?.contentDocument;
       if (root) wireTree(root, wired);
+      live.syncRemoved();
     };
     const timer = setInterval(scan, 700);
     return () => clearInterval(timer);
@@ -204,7 +211,7 @@ function wireDocument(doc: Document) {
   const onKey = (e: KeyboardEvent) => {
     if (!editing) {
       // Mode shortcuts work while the page has focus too; the course never sees the key.
-      if (modeShortcut(e)) {
+      if (modeShortcut(e) || undoShortcut(e)) {
         e.preventDefault();
         e.stopImmediatePropagation();
       }

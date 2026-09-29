@@ -43,10 +43,61 @@ export function DeleteDialog() {
 
         {plan && !plan.blocked && st.stage === 'review' && (
           <div className="plan">
-            <section>
-              <h4>🗑 {plan.pages.length} page{plan.pages.length === 1 ? '' : 's'} removed</h4>
-              <List items={plan.pages} />
-            </section>
+            {plan.hubs.length > 0 && (
+              <section className="hub">
+                <h4>⚠ You're deleting a main page of the course</h4>
+                <ul className="plain-list small">
+                  {plan.hubs.map((h) => (
+                    <li key={h.page}>
+                      <b className="mono">{basename(h.page)}</b>
+                      {h.start ? ' is where the course opens' : ''}
+                      {h.start && h.linkedFrom ? ', and ' : ''}
+                      {h.linkedFrom ? `${h.linkedFrom} page${h.linkedFrom === 1 ? ' links' : 's link'} to it (for example a Home or Dashboard button)` : ''}.
+                    </li>
+                  ))}
+                </ul>
+                <p className="small">
+                  Pages like a dashboard often hold course progress, resume and exam status. Make sure you mean to remove it.
+                </p>
+              </section>
+            )}
+            {plan.pages.length > 0 && (
+              <section>
+                <h4>🗑 {plan.pages.length} page{plan.pages.length === 1 ? '' : 's'} removed</h4>
+                <List items={plan.pages} />
+              </section>
+            )}
+            {plan.otherFiles.length > 0 && (
+              <section>
+                <h4>📄 {plan.otherFiles.length} other file{plan.otherFiles.length === 1 ? '' : 's'} removed</h4>
+                <ul className="plain-list mono small">
+                  {plan.otherFiles.slice(0, 10).map((o) => (
+                    <li key={o.path}>
+                      {o.path}
+                      {o.usedBy.length ? <span className="warn-text"> · still used by {o.usedBy.length} file{o.usedBy.length === 1 ? '' : 's'} ({o.usedBy.slice(0, 2).map(basename).join(', ')})</span> : <span className="muted"> · not used anywhere</span>}
+                    </li>
+                  ))}
+                  {plan.otherFiles.length > 10 && <li className="muted">…and {plan.otherFiles.length - 10} more</li>}
+                </ul>
+              </section>
+            )}
+            {plan.unresolved.length > 0 && (
+              <section className="hub">
+                <h4>🔗 {plan.unresolved.length} link{plan.unresolved.length === 1 ? ' has' : 's have'} nowhere to go</h4>
+                <p className="small">
+                  There's no page left on the right side of the gap for {plan.unresolved.length === 1 ? 'this link' : 'these links'} (usually a
+                  button that goes back to the deleted page from the page right after it). They'll be left as they are and shown as
+                  broken links; after deleting, use <b>Fix</b> in the course check to choose where they should go, or cancel and keep the page.
+                </p>
+                <ul className="plain-list mono small">
+                  {plan.unresolved.slice(0, 8).map((u) => (
+                    <li key={u.file + u.link}>
+                      {basename(u.file)} → {u.link}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <section>
               <h4>🖼 {plan.assets.length} image/audio file{plan.assets.length === 1 ? '' : 's'} removed</h4>
               {plan.assets.length ? (
@@ -186,8 +237,10 @@ export function DeleteDialog() {
               {errors.length ? `⛔ Course check found ${errors.length} problem${errors.length > 1 ? 's' : ''}` : '✓ Course check passed: no broken links, loops or missing tracked pages'}
               {st.check.nextChain && <div className="small muted">Next buttons lead through {st.check.nextChain.length} pages.</div>}
             </div>
-            <CheckList issues={st.check.issues.filter((i) => i.severity !== 'info')} onOpen={() => deleteFlow.close()} />
-            <p className="small muted">Removed {plan?.pages.length} pages and {plan?.assets.length} files. Undo with Ctrl+Z (⌘Z) if needed.</p>
+            <CheckList issues={st.check.issues.filter((i) => i.severity !== 'info')} onOpen={() => deleteFlow.close()} onFixed={() => deleteFlow.recheck()} />
+            <p className="small muted">
+              Removed {plan?.pages.length} pages and {(plan?.assets.length ?? 0) + (plan?.otherFiles.length ?? 0)} files. Undo with Ctrl+Z (⌘Z) if needed.
+            </p>
           </div>
         )}
 
@@ -197,7 +250,8 @@ export function DeleteDialog() {
             <>
               <button onClick={() => deleteFlow.close()}>Cancel</button>
               <button className="danger" onClick={() => void deleteFlow.confirm()}>
-                Delete {plan!.pages.length} page{plan!.pages.length === 1 ? '' : 's'}
+                Delete {plan!.pages.length + plan!.otherFiles.length} {plan!.otherFiles.length ? 'file' : 'page'}
+                {plan!.pages.length + plan!.otherFiles.length === 1 ? '' : 's'}
               </button>
             </>
           ) : (

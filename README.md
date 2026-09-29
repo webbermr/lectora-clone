@@ -61,8 +61,10 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Stage width presets (desktop, laptop, tablet, phone)
 
 **Deleting chapters, sections and pages** (Lectora courses)
-- Pick any mix of chapters, sections and pages in the Title Explorer (Ctrl/⌘-click for several) and
-  press 🗑. A review window shows everything that will change before anything does:
+- Pick any mix of chapters, sections and pages in the Title Explorer and press 🗑. Selection works the
+  usual way: click for one, Ctrl/⌘-click to add or remove (removing a chapter removes its sections too),
+  Shift-click for a range, Esc to clear. The 🗑 button shows how many pages that adds up to.
+  A review window shows everything that will change before anything does:
   - the page files, plus images/audio that only those pages use (anything still used elsewhere is kept)
   - every Next, Back, menu and jump link that pointed at a deleted page, rewired across the gap:
     forward links go to the next remaining page, backward links to the previous one, never to the
@@ -87,9 +89,17 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   still can't read the answers. Deleted questions leave the test, a section never draws more
   random questions than it has left, emptied sections go, and the pass/fail/back pages are
   pointed elsewhere if deleted. The test's results page can't be deleted
-- The course check runs straight after, and the whole delete is one undo step
+- Deleting a **main page** (the page the course opens on, or one many pages link to, like a student
+  dashboard) gets a warning in the review. Links that have nowhere to go (the only page left nearby
+  is the linking page itself) are listed there too, rather than silently left broken
+- The Files tab can select several files the same way and delete them through the same review:
+  pages are handled as above, other files show which pages still use them, and the course's player
+  and tracking files (manifest, `trivantis*.js`, `enc.js`, the test files) can't be deleted
+- The course check runs straight after, and the whole delete is one undo step. A broken link it
+  finds has a **Fix** button: pick the page it should go to and the link is repointed
 
 **Course check** (sidebar **Check** tab)
+- Broken links have a **Fix** button to repoint them at a page you choose
 - Finds links to pages that aren't in the package, Next/Back buttons that loop or point at their own
   page, visit tracking that lists missing pages, progress totals the pages can no longer reach, and
   manifest problems. Lectora's own runtime files (trivantis*.js etc.) aren't treated as course pages
@@ -111,6 +121,16 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   **Show** or **Replace** each one. Lectora's transparent spacer GIFs are left out
 - **Interact** mode lets you click through a single-page player to the screen you want.
   Press **S** for Select & edit and **I** for Interact (ignored while typing in a text box)
+- **Remove** callouts, buttons, images and other objects: select one and press 🗑 Remove in the
+  panel. A click on part of an object (an SVG path, a word) removes the whole object, shown with
+  Lectora's own name for it. Objects sitting on top of it (a callout's text) can go with it, and
+  objects that repeat on many pages (a Table of Contents button) can be removed from all of them
+  at once. Buttons that move the learner to another page get a warning first. Objects are hidden
+  with a rule in the page's own `<style id="lc-removed">` block rather than cut out of the code,
+  because the page's scripts still show, hide and animate them by id. With nothing selected, the
+  panel lists what's been removed on the page, with Restore buttons
+- Ctrl/⌘+Z and Ctrl/⌘+Y (or Shift+Z) undo and redo in every view, including while the Live edit
+  page has focus; text boxes keep their own undo
 - If the same text appears in several places, you pick which ones change
 - Edit view spots pages that are mostly script and offers to switch to Live edit
 
@@ -121,6 +141,10 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Runs the course with scripts enabled against a built-in LMS
   (`window.API` for 1.2 and `window.API_1484_11` for 2004)
 - Prev/Next through the organization, live completion/score readout, SCORM call log, reset
+- Audio and video can be scrubbed: the preview server answers the byte-range requests players
+  use to seek
+- As you click through the course (in Preview or Live edit), the Title Explorer and Files tab
+  highlight the page on screen and scroll to it. Switching views carries on from that page
 
 **Code view**
 - Edit any text file (HTML, CSS, JS, XML, JSON), including `imsmanifest.xml`
@@ -178,5 +202,7 @@ src/lib/editor.ts     live editing session (select, insert, commit)
 src/lib/scormApi.ts   preview LMS
 src/lib/sourceMatch.ts  find on-screen text in source, however it's encoded
 src/lib/live.ts       Live edit session (text write-back, asset replacement)
+src/lib/frameFollow.ts  Follows the page a Live edit / Preview frame has navigated to
+src/lib/removeObjects.ts  Hiding page objects by id (Live edit Remove / Restore)
 src/components/       React UI (ribbon, explorer, stage, properties)
 ```

@@ -47,7 +47,7 @@ export function CourseCheckPanel() {
               {stale ? ' · run again after further edits' : ''}
             </div>
           </div>
-          <CheckList issues={result.issues} />
+          <CheckList issues={result.issues} onFixed={run} />
         </>
       )}
     </div>

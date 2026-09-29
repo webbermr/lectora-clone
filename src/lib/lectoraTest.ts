@@ -38,8 +38,9 @@ export function lectoraCipher(encJs: string, titlemgr: string): LectoraCipher {
   if (!bdc || !/\bhlf\s*\(/.test(bdc)) throw new Error("trivantis-titlemgr.js doesn't contain Lectora's test decryption.");
   if (!/\bCJ\b/.test(encJs)) throw new Error("enc.js doesn't look like Lectora's encryption library.");
   // Browser globals are shadowed so the course's script can't touch the editor.
+  // It only gets a random source, which encrypting needs for the salt.
   const factory = new Function(
-    'window', 'document', 'self', 'globalThis', 'fetch', 'XMLHttpRequest', 'localStorage', 'indexedDB',
+    'window', 'document', 'self', 'globalThis', 'global', 'fetch', 'XMLHttpRequest', 'localStorage', 'indexedDB',
     `${encJs}
 ;var utf8 = CJ.enc.Utf8;
 var __key = null;
@@ -53,7 +54,8 @@ return {
   }
 };`,
   );
-  return factory() as LectoraCipher;
+  const sandbox = { crypto: { getRandomValues: <T extends ArrayBufferView>(a: T) => crypto.getRandomValues(a as never) as T } };
+  return factory(sandbox, undefined, sandbox, sandbox, sandbox) as LectoraCipher;
 }
 
 export interface OpenedTests {

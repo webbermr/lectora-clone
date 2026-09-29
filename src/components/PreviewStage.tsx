@@ -3,6 +3,7 @@ import { flattenItems } from '../lib/manifest';
 import { previewLms, type ScormLogEntry } from '../lib/scormApi';
 import { store, useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
+import { useFollowFrame } from '../lib/frameFollow';
 
 /** Runs the course as an LMS would: scripts on, SCORM API available, item-by-item navigation. */
 export function PreviewStage({ width }: { width: string }) {
@@ -16,6 +17,8 @@ export function PreviewStage({ width }: { width: string }) {
   const [log, setLog] = useState<ScormLogEntry[]>(() => [...previewLms.log]);
   const [showLog, setShowLog] = useState(false);
   const logEnd = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLIFrameElement>(null);
+  useFollowFrame(frame, p.id);
 
   useEffect(() => {
     previewLms.install(window);
@@ -58,7 +61,7 @@ export function PreviewStage({ width }: { width: string }) {
       <div className="preview-body">
         <div className="stage-scroll">
           <div className="stage-frame" style={{ width }}>
-            <iframe key={`${src}#${nonce}`} src={src} title="Course preview" className="stage-iframe" allow="autoplay; fullscreen" />
+            <iframe ref={frame} key={`${src}#${nonce}`} src={src} title="Course preview" className="stage-iframe" allow="autoplay; fullscreen" />
           </div>
         </div>
         {showLog && (
