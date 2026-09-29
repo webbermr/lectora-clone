@@ -123,7 +123,8 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   Press **S** for Select & edit and **I** for Interact (ignored while typing in a text box)
 - **Remove** callouts, buttons, images and other objects: select one and press 🗑 Remove in the
   panel. A click on part of an object (an SVG path, a word) removes the whole object, shown with
-  Lectora's own name for it. Objects sitting on top of it (a callout's text) can go with it, and
+  Lectora's own name for it. Lectora draws an object with several elements named after it
+  (`button6746path`, `button6746SVG`, `button6746MapArea`…), not always nested, and every part is hidden. Objects sitting on top of it (a callout's text) can go with it, and
   objects that repeat on many pages (a Table of Contents button) can be removed from all of them
   at once. Buttons that move the learner to another page get a warning first. Objects are hidden
   with a rule in the page's own `<style id="lc-removed">` block rather than cut out of the code,
@@ -145,6 +146,9 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   use to seek
 - As you click through the course (in Preview or Live edit), the Title Explorer and Files tab
   highlight the page on screen and scroll to it. Switching views carries on from that page
+- Works with Lectora's page player too, where the address stays on `a001index.html` while pages
+  are swapped in: the page on screen is recognised by the Lectora objects it declares (the ones
+  only that page has decide it), so the highlight, Remove and the page assets panel all follow it
 
 **Code view**
 - Edit any text file (HTML, CSS, JS, XML, JSON), including `imsmanifest.xml`
@@ -204,5 +208,6 @@ src/lib/sourceMatch.ts  find on-screen text in source, however it's encoded
 src/lib/live.ts       Live edit session (text write-back, asset replacement)
 src/lib/frameFollow.ts  Follows the page a Live edit / Preview frame has navigated to
 src/lib/removeObjects.ts  Hiding page objects by id (Live edit Remove / Restore)
+src/lib/pageIdentity.ts   Which page a running document shows (address, or Lectora objects)
 src/components/       React UI (ribbon, explorer, stage, properties)
 ```

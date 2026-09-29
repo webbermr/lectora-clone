@@ -13,7 +13,35 @@ import { textOf } from './assetRefs';
 
 export const REMOVED_STYLE_ID = 'lc-removed';
 const BLOCK = new RegExp(`<style id="${REMOVED_STYLE_ID}">([\\s\\S]*?)</style>\\n?`);
-const RULE = /#([A-Za-z_][\w-]*)\s*\{\s*display\s*:\s*none\s*!important\s*;?\s*\}/g;
+/** One rule per object: `#button6746,#button6746path,…{display:none!important}`. The first id names it. */
+const RULE = /#([A-Za-z_][\w-]*)((?:\s*,\s*#[\w-]+)*)\s*\{\s*display\s*:\s*none\s*!important\s*;?\s*\}/g;
+
+/**
+ * Lectora draws one object with several elements named after it (`button6746path`, `button6746SVG`,
+ * `button6746MapArea`…), and they aren't always nested inside the object's own element. Every part
+ * is hidden, or a click area or outline would stay behind. Suffixes from trivantis.js.
+ */
+export const PART_SUFFIXES = ['div', 'path', 'SVG', 'MapArea', 'Map', 'TextSpan', 'TextDiv', 'text', 'imgF', 'Img', 'border', 'Mask', 'Object', 'ObjLayer', 'Reflection', 'ReflectionDiv', 'ReflectionSVG', 'AlphaGradient'];
+
+/** The object an element id belongs to: itself, or the declared object it's a part of. */
+export function objectIdOf(elementId: string, declared: Map<string, PageObject>): string | null {
+  if (declared.has(elementId)) return elementId;
+  let best: string | null = null;
+  for (const id of declared.keys()) {
+    // "button204030path" belongs to button204030; "button2040301" is a different object.
+    if (elementId.length > id.length && elementId.startsWith(id) && !/\d/.test(elementId[id.length]) && (!best || id.length > best.length)) best = id;
+  }
+  return best;
+}
+
+/** Ids of an object's parts: the known suffixes plus any others the running page has. */
+export function partIds(id: string, doc?: Document | null): string[] {
+  const out = new Set([id, ...PART_SUFFIXES.map((s) => id + s)]);
+  for (const e of Array.from(doc?.querySelectorAll(`[id^="${id}"]`) ?? [])) {
+    if (e.id.length > id.length && !/\d/.test(e.id[id.length]) && /^[\w-]+$/.test(e.id)) out.add(e.id);
+  }
+  return [...out];
+}
 
 export interface PageObject {
   id: string;
@@ -32,20 +60,33 @@ export function declaredObjects(html: string): Map<string, PageObject> {
   return out;
 }
 
-/** Ids this editor has hidden on a page. */
-export function hiddenIds(html: string): string[] {
+/** Objects this editor has hidden on a page, each with the element ids its rule covers. */
+export function hiddenRules(html: string): Map<string, string[]> {
   const block = BLOCK.exec(html)?.[1] ?? '';
-  return [...block.matchAll(RULE)].map((m) => m[1]);
+  const out = new Map<string, string[]>();
+  for (const m of block.matchAll(RULE)) out.set(m[1], [m[1], ...[...m[2].matchAll(/#([\w-]+)/g)].map((x) => x[1])]);
+  return out;
 }
 
-export function removedCss(ids: string[]): string {
-  return ids.map((id) => `#${id}{display:none!important}`).join('\n');
+/** Objects this editor has hidden on a page. */
+export function hiddenIds(html: string): string[] {
+  return [...hiddenRules(html).keys()];
 }
 
-/** The page with exactly these ids hidden (none → the block is taken out again). */
-export function setHidden(html: string, ids: string[]): string {
+/** Rules for these objects; `parts` gives each one's element ids (default: the known suffixes). */
+export function removedCss(ids: string[], parts?: Map<string, string[]>): string {
+  return ids.map((id) => `${(parts?.get(id) ?? partIds(id)).map((x) => '#' + x).join(',')}{display:none!important}`).join('\n');
+}
+
+/**
+ * The page with exactly these objects hidden (none → the block is taken out again).
+ * `parts` adds element ids seen on the running page; rules already on the page keep theirs.
+ */
+export function setHidden(html: string, ids: string[], parts: Map<string, string[]> = new Map()): string {
   const unique = [...new Set(ids)];
-  const block = unique.length ? `<style id="${REMOVED_STYLE_ID}">\n${removedCss(unique)}\n</style>\n` : '';
+  const known = hiddenRules(html);
+  const merged = new Map(unique.map((id) => [id, [...new Set([...partIds(id), ...(known.get(id) ?? []), ...(parts.get(id) ?? [])])]]));
+  const block = unique.length ? `<style id="${REMOVED_STYLE_ID}">\n${removedCss(unique, merged)}\n</style>\n` : '';
   if (BLOCK.test(html)) return html.replace(BLOCK, block);
   if (!block) return html;
   const head = /<\/head\s*>/i.exec(html);
@@ -79,13 +120,15 @@ export function pagesWithObject(files: FileMap, id: string): string[] {
 
 /**
  * The whole object a click landed on: from an inner SVG path or span, walk up to the element the
- * page declared (`shape58889` for a click on `shape58889path`), else the nearest element with an id.
+ * page declared (`shape58889` for a click on `shape58889path`, even when that path isn't nested inside
+ * it), else the nearest element with an id.
  */
-export function objectRoot(el: Element, declared: Map<string, PageObject>): Element | null {
+export function objectRoot(el: Element, declared: Map<string, PageObject>): { id: string; element: Element } | null {
   let fallback: Element | null = null;
   for (let e: Element | null = el; e && e.tagName !== 'BODY' && e.tagName !== 'HTML'; e = e.parentElement) {
-    if (e.id && declared.has(e.id)) return e;
+    const id = e.id ? objectIdOf(e.id, declared) : null;
+    if (id) return { id, element: e.ownerDocument.getElementById(id) ?? e };
     if (e.id && !fallback && e.id !== 'pageDIV') fallback = e;
   }
-  return fallback;
+  return fallback ? { id: fallback.id, element: fallback } : null;
 }
