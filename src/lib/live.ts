@@ -6,22 +6,12 @@
  */
 import { useSyncExternalStore } from 'react';
 import { chooseMatches } from './dialog';
-import { isHtmlFile, isImageFile, isTextFile, normalize, resolveFrom } from './paths';
+import { isHtmlFile, isImageFile, isTextFile, resolveFrom } from './paths';
 import { applyToText, findEverywhere, visibleText, type SourceMatch } from './sourceMatch';
 import { store, type FileChange } from './store';
-import { decodeText, encodeText } from './text';
+import { encodeText } from './text';
+import { referencedAssets, textOf } from './assetRefs';
 import { vfsUrl } from './vfs';
-
-// Decoding every text file on each search is wasteful; file bytes are replaced, never mutated.
-const decoded = new WeakMap<Uint8Array, string>();
-function textOf(bytes: Uint8Array): string {
-  let t = decoded.get(bytes);
-  if (t === undefined) {
-    t = decodeText(bytes);
-    decoded.set(bytes, t);
-  }
-  return t;
-}
 
 export type LiveMode = 'select' | 'interact';
 
@@ -315,12 +305,7 @@ class LiveSession {
       }
     }
     if (pagePath && files[pagePath]) {
-      const html = textOf(files[pagePath]);
-      for (const m of html.matchAll(ASSET_REF)) {
-        const ref = m[1].replace(/\\\//g, '/');
-        const path = [resolveFrom(pagePath, ref), normalize(ref)].find((p) => p && files[p]);
-        if (path && !isHtmlFile(path)) entry(path);
-      }
+      for (const path of referencedAssets(pagePath, files)) entry(path);
     }
     return [...byPath.values()]
       .filter((a) => !isSpacer(a))
@@ -345,7 +330,6 @@ export interface PageAsset {
 }
 
 const KIND_ORDER: AssetKind[] = ['image', 'video', 'audio', 'other'];
-const ASSET_REF = /["'(=]\s*([^"'()\s<>]+?\.(?:png|jpe?g|gif|svg|webp|bmp|mp4|webm|ogv|m4v|mov|mp3|wav|ogg|oga|m4a|aac|flv|swf|pdf|docx?|xlsx?|pptx?|zip|vtt|srt))(?:[?#][^"')\s]*)?\s*["')]/gi;
 
 export function assetKind(path: string): AssetKind {
   if (isImageFile(path)) return 'image';

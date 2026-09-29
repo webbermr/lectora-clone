@@ -223,3 +223,6 @@ mark { background: #ffe58a; color: inherit; }
 .tag { font-size: 10.5px; background: #eef1f5; color: var(--muted); border-radius: 8px; padding: 0 6px; white-space: nowrap; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
 .unlisted { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 4px; }
 .module-filter { width: 100%; margin-bottom: 6px; }
+.chapters { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+.chapters-head { display: flex; gap: 6px; align-items: baseline; cursor: pointer; padding: 2px 4px; }
+.chapters-note { margin: 2px 4px 6px; }
