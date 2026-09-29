@@ -30,7 +30,7 @@ export interface Project {
   manifestError?: string;
 }
 
-export type View = 'edit' | 'preview' | 'code';
+export type View = 'edit' | 'live' | 'preview' | 'code';
 
 class Store {
   project: Project | null = null;

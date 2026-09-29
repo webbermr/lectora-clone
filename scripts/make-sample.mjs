@@ -153,4 +153,82 @@ function finish(){ if (api) { api.SetValue('cmi.completion_status','completed');
 </body></html>
 `);
 writeFileSync('samples/workshop-safety-scorm2004.zip', await zip2004.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
-console.log('Wrote samples/coffee-basics-scorm12.zip and samples/workshop-safety-scorm2004.zip');
+
+// A course whose pages are drawn by JavaScript, like Lectora and Storyline
+// output: the HTML files are mostly script, and the text lives in JS strings
+// and a JSON-ish data file.
+const runtime = `/* tiny stand-in for an authoring tool's runtime */
+function ObjInline(id, x, y, w, html) { this.id = id; this.x = x; this.y = y; this.w = w; this.html = html; }
+ObjInline.prototype.build = function () {
+  var d = document.createElement('div');
+  d.id = this.id;
+  d.style.cssText = 'position:absolute;left:' + this.x + 'px;top:' + this.y + 'px;width:' + this.w + 'px';
+  d.innerHTML = this.html;
+  document.getElementById('stage').appendChild(d);
+};
+function ObjImage(id, x, y, w, src) { this.id = id; this.x = x; this.y = y; this.w = w; this.src = src; }
+ObjImage.prototype.build = function () {
+  var i = new Image();
+  i.id = this.id; i.src = this.src; i.alt = '';
+  i.style.cssText = 'position:absolute;left:' + this.x + 'px;top:' + this.y + 'px;width:' + this.w + 'px';
+  document.getElementById('stage').appendChild(i);
+};
+function ObjButton(id, x, y, label, target) { this.id = id; this.x = x; this.y = y; this.label = label; this.target = target; }
+ObjButton.prototype.build = function () {
+  var b = document.createElement('button');
+  b.id = this.id; b.textContent = this.label; var t = this.target;
+  b.style.cssText = 'position:absolute;left:' + this.x + 'px;top:' + this.y + 'px;padding:8px 20px;background:#b22;color:#fff;border:0;border-radius:4px';
+  b.onclick = function () { location.href = t; };
+  document.getElementById('stage').appendChild(b);
+};
+`;
+const scriptedPage = (title, body) => `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title}</title>
+<script src="trivantis.js"></script>
+<script src="js/scorm.js"></script>
+</head>
+<body style="margin:0;background:#eee">
+<div id="stage" style="position:relative;width:900px;height:560px;margin:20px auto;background:#fff;font-family:Arial,sans-serif"></div>
+<script>
+${body}
+</script>
+</body></html>
+`;
+const zip3 = new JSZip();
+zip3.file('imsmanifest.xml', manifest12
+  .replace(/COFFEE_BASICS/g, 'FIRE_SAFETY').replace('<title>Coffee Basics</title>', '<title>Fire Safety</title>')
+  .replace(/<item identifier="ITEM_2"[\s\S]*?<\/organization>/, '</organization>')
+  .replace('<title>Welcome</title>', '<title>Fire Safety</title>')
+  .replace(/href="content\/intro.html"/g, 'href="a001_welcome.html"')
+  .replace(/<resource identifier="RES_2"[\s\S]*?<resource identifier="SHARED"/, '<resource identifier="SHARED"')
+  .replace('images/bean.png', 'images/extinguisher.png')
+  .replace('<file href="css/course.css"/>', '<file href="trivantis.js"/><file href="a001_extinguishers.html"/><file href="data/slide2.js"/>'));
+zip3.file('trivantis.js', runtime);
+zip3.file('js/scorm.js', api);
+zip3.file('images/extinguisher.png', png(200, 30, 30));
+zip3.file('a001_welcome.html', scriptedPage('Welcome', `var text1 = new ObjInline('text1', 40, 30, 700, '<h1 style="color:#b22;margin:0">Welcome to Fire Safety</h1>');
+text1.build();
+var text2 = new ObjInline('text2', 40, 100, 520, '<p style="font-size:18px">It\\'s your job to know where the exits are &amp; how to use an extinguisher.</p>');
+text2.build();
+var image1 = new ObjImage('image1', 620, 100, 200, 'images/extinguisher.png');
+image1.build();
+var button1 = new ObjButton('button1', 760, 490, 'Next', 'a001_extinguishers.html');
+button1.build();`));
+zip3.file('data/slide2.js', `window.slideData = {"title":"Extinguisher types","lines":["Water \\u2014 for paper and wood","CO\\u2082 \\u2014 for electrical fires","Always check the gauge before use"]};\n`);
+zip3.file('a001_extinguishers.html', `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Extinguishers</title>
+<script src="data/slide2.js"></script>
+</head>
+<body style="margin:0;background:#eee">
+<svg id="slide" width="900" height="560" style="display:block;margin:20px auto;background:#fff;font-family:Arial,sans-serif"></svg>
+<script>
+var svg = document.getElementById('slide'), NS = 'http://www.w3.org/2000/svg';
+function t(str, y, size) { var e = document.createElementNS(NS, 'text'); e.setAttribute('x', 40); e.setAttribute('y', y); e.setAttribute('font-size', size); e.textContent = str; svg.appendChild(e); }
+t(slideData.title, 60, 32);
+slideData.lines.forEach(function (l, i) { t(l, 130 + i * 40, 20); });
+</script>
+</body></html>
+`);
+writeFileSync('samples/fire-safety-scripted-scorm12.zip', await zip3.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+
+console.log('Wrote samples/coffee-basics-scorm12.zip samples/workshop-safety-scorm2004.zip and samples/fire-safety-scripted-scorm12.zip');

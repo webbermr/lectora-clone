@@ -1,19 +1,21 @@
 import { useRef, useState } from 'react';
 import * as actions from '../lib/actions';
+import { FindReplace } from './FindReplace';
 import type { ItemNode } from '../lib/manifest';
 import { isHtmlFile, isImageFile, isMediaFile, isTextFile } from '../lib/paths';
 import { store, useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
 
 export function Sidebar() {
-  const [tab, setTab] = useState<'title' | 'files'>('title');
+  const [tab, setTab] = useState<'title' | 'files' | 'find'>('title');
   return (
     <aside className="sidebar">
       <div className="tabs">
         <button className={tab === 'title' ? 'active' : ''} onClick={() => setTab('title')}>Title Explorer</button>
         <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}>Files</button>
+        <button className={tab === 'find' ? 'active' : ''} onClick={() => setTab('find')}>Find</button>
       </div>
-      {tab === 'title' ? <TitleExplorer /> : <FileList />}
+      {tab === 'title' ? <TitleExplorer /> : tab === 'files' ? <FileList /> : <FindReplace />}
     </aside>
   );
 }

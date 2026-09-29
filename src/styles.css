@@ -166,3 +166,32 @@ button.big { padding: 10px 18px; font-size: 15px; }
   .workspace { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
   .sidebar, .props { max-height: 30vh; }
 }
+
+/* ----- live edit, find, dialogs ----- */
+.stage-col { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.banner { display: flex; gap: 12px; align-items: center; padding: 8px 12px; background: #fff7e0; border-bottom: 1px solid #ecd9a0; font-size: 12.5px; }
+.banner span { flex: 1; }
+.segmented { display: inline-flex; }
+.segmented button { border-radius: 0; }
+.segmented button:first-child { border-radius: 5px 0 0 5px; }
+.segmented button:last-child { border-radius: 0 5px 5px 0; margin-left: -1px; }
+.stack { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px 8px; }
+.wide-cell { grid-column: 1 / -1; word-break: break-all; }
+.text-piece { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; border-bottom: 1px dashed var(--line); }
+.text-piece:last-child { border-bottom: 0; }
+.text-piece .text-edit { min-height: 56px; }
+.text-piece-foot { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+.text-piece-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.find-results { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; }
+.find-results li { display: flex; gap: 4px; align-items: stretch; }
+.find-hit { flex: 1; min-width: 0; text-align: left; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.find-hit span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx { color: var(--muted); }
+mark { background: #ffe58a; color: inherit; }
+.modal-backdrop { position: fixed; inset: 0; background: #0006; display: grid; place-items: center; z-index: 100; padding: 16px; }
+.modal { background: #fff; border-radius: 10px; padding: 18px; width: min(720px, 100%); max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px #0005; }
+.modal h3 { margin: 0 0 4px; }
+.match-list { list-style: none; padding: 0; margin: 10px 0; overflow: auto; display: grid; gap: 6px; }
+.match-list label { display: flex; gap: 8px; align-items: flex-start; padding: 6px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.match-list .mono { white-space: pre-wrap; word-break: break-all; }
+.modal-actions { display: flex; gap: 6px; }

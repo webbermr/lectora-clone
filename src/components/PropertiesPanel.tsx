@@ -4,6 +4,7 @@ import { editor, NON_TEXT_TAGS, useEditor } from '../lib/editor';
 import { isImageFile, isMediaFile, relative, resolveFrom } from '../lib/paths';
 import { useStore } from '../lib/store';
 import { describe } from './EditStage';
+import { LivePanel } from './LivePanel';
 
 type El = HTMLElement;
 
@@ -316,7 +317,8 @@ export function PropertiesPanel() {
   const ed = useEditor();
   const s = useStore();
   let body: ReactNode;
-  if (s.view !== 'edit') body = <p className="hint">Switch to Edit view to change page objects.</p>;
+  if (s.view === 'live') body = <LivePanel />;
+  else if (s.view !== 'edit') body = <p className="hint">Switch to Edit view to change page objects.</p>;
   else if (!ed.doc || !ed.path) body = <p className="hint">Open an HTML page to see its properties.</p>;
   else if (ed.selected && ed.selected.isConnected) body = <ElementProps key={ed.getVersion()} el={ed.selected} pagePath={ed.path} />;
   else body = <PageProps key={ed.getVersion()} doc={ed.doc} />;

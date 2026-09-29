@@ -20,6 +20,7 @@ export function Toolbar({ width, setWidth }: { width: string; setWidth: (w: stri
 
   const views: [View, string][] = [
     ['edit', '✎ Edit'],
+    ['live', '⚡ Live edit'],
     ['preview', '▶ Preview'],
     ['code', '</> Code'],
   ];
