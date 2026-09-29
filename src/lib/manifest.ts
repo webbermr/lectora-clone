@@ -298,6 +298,39 @@ export function listFileInResource(xml: string, resourceId: string, fileHref: st
   return serialize(doc, xml);
 }
 
+/**
+ * Remove resources, every <dependency> that points at them, and any <file>
+ * entry for the given paths (e.g. images in a shared resource). Whitespace
+ * left by removed elements is tidied so the file doesn't fill with blank lines.
+ */
+export function removeResourcesAndFiles(xml: string, resourceIds: Iterable<string>, filePaths: Iterable<string>): string {
+  const doc = parse(xml);
+  const ids = new Set(resourceIds);
+  const paths = new Set(filePaths);
+  const drop = (el: Element) => {
+    const prev = el.previousSibling;
+    if (prev && prev.nodeType === 3 && !prev.textContent!.trim()) prev.parentNode!.removeChild(prev);
+    el.parentNode?.removeChild(el);
+  };
+  for (const res of Array.from(doc.getElementsByTagNameNS('*', 'resource'))) {
+    if (ids.has(res.getAttribute('identifier') ?? '')) drop(res);
+  }
+  for (const dep of Array.from(doc.getElementsByTagNameNS('*', 'dependency'))) {
+    if (ids.has(dep.getAttribute('identifierref') ?? '')) drop(dep);
+  }
+  if (paths.size) {
+    const { list } = readResources(doc);
+    const byId = new Map(list.map((r) => [r.identifier, r]));
+    for (const res of Array.from(doc.getElementsByTagNameNS('*', 'resource'))) {
+      const model = byId.get(res.getAttribute('identifier') ?? '');
+      kids(res, 'file').forEach((f, i) => {
+        if (model && paths.has(model.files[i])) drop(f);
+      });
+    }
+  }
+  return serialize(doc, xml);
+}
+
 export function createManifest(version: ScormVersion, title: string): string {
   const id = uid('COURSE');
   const esc = title.replace(/&/g, '&amp;').replace(/</g, '&lt;');

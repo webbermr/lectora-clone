@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import * as actions from '../lib/actions';
+import { CourseCheckPanel } from './CourseCheckPanel';
 import { FindReplace } from './FindReplace';
+import { deleteFlow } from '../lib/deleteFlow';
 import { flattenItems, type ItemNode } from '../lib/manifest';
 import { isHtmlFile, isImageFile, isMediaFile, isTextFile } from '../lib/paths';
 import { store, useStore } from '../lib/store';
@@ -8,15 +10,16 @@ import { buildFileIndex, inferLectoraStructure, isLectoraPackage, pageCount, typ
 import { vfsUrl } from '../lib/vfs';
 
 export function Sidebar() {
-  const [tab, setTab] = useState<'title' | 'files' | 'find'>('title');
+  const [tab, setTab] = useState<'title' | 'files' | 'find' | 'check'>('title');
   return (
     <aside className="sidebar">
       <div className="tabs">
         <button className={tab === 'title' ? 'active' : ''} onClick={() => setTab('title')}>Title Explorer</button>
         <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}>Files</button>
         <button className={tab === 'find' ? 'active' : ''} onClick={() => setTab('find')}>Find</button>
+        <button className={tab === 'check' ? 'active' : ''} onClick={() => setTab('check')} title="Check the course for broken links, loops and tracking problems">Check</button>
       </div>
-      {tab === 'title' ? <TitleExplorer /> : tab === 'files' ? <FileList /> : <FindReplace />}
+      {tab === 'title' ? <TitleExplorer /> : tab === 'files' ? <FileList /> : tab === 'find' ? <FindReplace /> : <CourseCheckPanel />}
     </aside>
   );
 }
@@ -29,6 +32,8 @@ function TitleExplorer() {
   const [collapsed, setCollapsed] = useState<Map<string, boolean>>(() => new Map());
   const [showUnlisted, setShowUnlisted] = useState(false);
   const [showChapters, setShowChapters] = useState(true);
+  // Recovered Lectora items picked for deleting (click, or Ctrl/⌘-click for several).
+  const [marked, setMarked] = useState<Set<string>>(() => new Set());
   const structure = useStructure();
   const index = structure?.manifestIndex;
   const lectora = structure?.lectora ?? null;
@@ -57,13 +62,38 @@ function TitleExplorer() {
     const title = prompt('Title for the new page:', 'New page');
     if (title) void actions.addPage(title, editable ? selected! : undefined);
   };
+  const inferredById = new Map(lectora ? flattenItems(lectora.modules).map((i) => [i.identifier, i]) : []);
+  const targets = [...marked].filter((id) => inferredById.has(id));
+  if (!targets.length && selected && inferredById.has(selected)) targets.push(selected);
+  const deleteInferred = () => {
+    const items = targets.map((id) => inferredById.get(id)!);
+    // Deleting a chapter and one of its own pages is the same as deleting the chapter.
+    const pages = [...new Set(items.flatMap((i) => flattenItems([i]).map((x) => x.href).filter((h): h is string => !!h)))];
+    const label = items.length === 1 ? `Delete "${items[0].title}"` : `Delete ${items.length} items`;
+    setMarked(new Set());
+    void deleteFlow.start(label, pages);
+  };
   const del = () => {
+    if (targets.length) return deleteInferred();
     if (!editable) return;
     const alsoFile = confirm('Remove this page from the course.\n\nOK also deletes its HTML file from the package. Cancel keeps the file.');
     void actions.deleteItem(selected, alsoFile);
   };
 
-  const ctx: TreeCtx = { selected, renaming, setRenaming, index, openFiles, toggleFiles, collapsed, setCollapsed: setItemCollapsed, currentPath: s.currentPath };
+  const onRowClick = (item: ItemNode, e: React.MouseEvent) => {
+    if (isInferred(item.identifier) && (e.ctrlKey || e.metaKey)) {
+      setMarked((prev) => {
+        const next = new Set(prev);
+        if (next.has(item.identifier)) next.delete(item.identifier);
+        else next.add(item.identifier);
+        return next;
+      });
+      return;
+    }
+    setMarked(new Set());
+    store.openPage(item.href ?? null, item.identifier);
+  };
+  const ctx: TreeCtx = { selected, renaming, setRenaming, index, openFiles, toggleFiles, collapsed, setCollapsed: setItemCollapsed, currentPath: s.currentPath, marked, onRowClick };
   const lectoraCtx: TreeCtx | null = lectora ? { ...ctx, index: lectora.index, closedByDefault: true } : null;
   const unlisted = lectora ? lectora.index.unlisted : index.unlisted;
 
@@ -88,7 +118,13 @@ function TitleExplorer() {
         <button onClick={() => editable && setRenaming(selected)} disabled={!editable}>Rename</button>
         <button onClick={() => editable && void actions.moveItem(selected!, -1)} disabled={!editable} title="Move up">↑</button>
         <button onClick={() => editable && void actions.moveItem(selected!, 1)} disabled={!editable} title="Move down">↓</button>
-        <button onClick={del} disabled={!editable} title="Delete page">🗑</button>
+        <button
+          onClick={del}
+          disabled={!editable && !targets.length}
+          title={targets.length > 1 ? `Delete the ${targets.length} selected items` : 'Delete the selected chapter, section or page'}
+        >
+          🗑{targets.length > 1 ? ` ${targets.length}` : ''}
+        </button>
       </div>
       {m.items.length ? (
         <ul className="tree">
@@ -110,7 +146,8 @@ function TitleExplorer() {
           </div>
           <p className="hint chapters-note">
             Recovered from Lectora's page file names, since the manifest lists this course as a single unit. Files
-            are matched to pages by what each page's HTML refers to.
+            are matched to pages by what each page's HTML refers to. Ctrl/⌘-click to pick several chapters, sections or
+            pages, then 🗑 to review and delete them.
           </p>
           {showChapters && (
             <ul className="tree">
@@ -181,6 +218,8 @@ interface TreeCtx {
   currentPath: string | null;
   /** Start modules closed (hundreds of recovered Lectora pages would otherwise flood the list). */
   closedByDefault?: boolean;
+  marked: Set<string>;
+  onRowClick: (item: ItemNode, e: React.MouseEvent) => void;
 }
 
 /** A module/section (has children) or a page (has a launch file), with its files on demand. */
@@ -199,9 +238,9 @@ function TreeItem({ item, depth, ctx }: { item: ItemNode; depth: number; ctx: Tr
   return (
     <li>
       <div
-        className={'tree-row' + (item.identifier === ctx.selected ? ' selected' : '') + (isModule ? ' module' : '')}
+        className={'tree-row' + (item.identifier === ctx.selected ? ' selected' : '') + (isModule ? ' module' : '') + (ctx.marked.has(item.identifier) ? ' marked' : '')}
         style={{ paddingLeft: 4 + depth * 14 }}
-        onClick={() => store.openPage(item.href ?? null, item.identifier)}
+        onClick={(e) => ctx.onRowClick(item, e)}
         onDoubleClick={() => !isInferred(item.identifier) && ctx.setRenaming(item.identifier)}
         title={item.title + '\n' + (item.href ? item.href + item.query : `${pages} page${pages === 1 ? '' : 's'}`)}
       >

@@ -310,4 +310,136 @@ ${pages.map((p) => `    <resource identifier="R_${p.id}" type="webcontent" adlcp
   writeFileSync('samples/onboarding-modules-scorm2004.zip', await z.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
 }
 
-console.log('Wrote samples/coffee-basics-scorm12.zip samples/workshop-safety-scorm2004.zip, samples/fire-safety-scripted-scorm12.zip and samples/onboarding-modules-scorm2004.zip');
+
+// A course built the way Lectora 19 publishes (single SCO, pages named
+// a001_<chapter>_<page>.html, trivExitPage navigation, a page-tracking tree,
+// P_<id> resources). The runtime here is a tiny stand-in written for this
+// sample, not Lectora's. The dashboard only unlocks the final assessment once
+// each module's last page has set its "done" variable.
+{
+  const modules = [
+    { id: 200, slug: 'getting_started', title: 'Getting Started', pages: ['welcome', 'how_to_navigate', 'module_summary'] },
+    { id: 300, slug: 'workplace_safety', title: 'Workplace Safety', pages: ['welcome', 'hazards', 'protective_gear', 'let_s_review', 'module_summary'] },
+    { id: 400, slug: 'reporting', title: 'Reporting', pages: ['welcome', 'when_to_report', 'module_summary'] },
+    { id: 500, slug: 'old_policies', title: 'Old Policies', pages: ['welcome', 'retired_rules'] },
+  ];
+  let nextId = 1000;
+  const pages = []; // { file, id, module, title, last }
+  pages.push({ file: 'a001_student_dashboard.html', id: 100, module: null, title: 'Dashboard' });
+  for (const m of modules) {
+    m.pages.forEach((p, i) => pages.push({ file: `a001_${m.slug}_${p}.html`, id: nextId++, module: m, title: p.replace(/_/g, ' '), last: i === m.pages.length - 1 }));
+  }
+  pages.push({ file: 'a001_final_assessment_begin.html', id: 900, module: null, title: 'Final Assessment' });
+  const idx = (f) => pages.findIndex((p) => p.file === f);
+  const runtime = `// Minimal stand-in for Lectora's runtime, for this sample only.
+function Variable(name, def) { this.name = name; this.def = def; }
+Variable.prototype.getValue = function () { var v = sessionStorage.getItem(this.name); return v === null ? this.def : v; };
+Variable.prototype.set = function (v) { sessionStorage.setItem(this.name, String(v)); };
+Variable.prototype.equals = function (v) { return this.getValue() == v; };
+function trivExitPage(page) { location.href = page; }
+`;
+  const tracking = (tree, numPages) => `function PageTrackingObj() { this.numPages = 0; this.title = null; }
+PageTrackingObj.prototype.find = function (n, id) { if (n.id == id) return n; for (var i = 0; n.c && i < n.c.length; i++) { var m = this.find(n.c[i], id); if (m) return m; } return null; };
+PageTrackingObj.prototype.SetRangeStatus = function (id, s) { var n = this.find(this.title, id); if (n) n.v = s; };
+var trivPageTracking = new PageTrackingObj();
+trivPageTracking.numPages = ${numPages};
+
+trivPageTracking.publishTimeStamp = 2026101012000;
+
+trivPageTracking.title=${tree};
+`;
+  const tree = `{id:1,v:0,c:[{id:100,v:0},${modules.map((m) => `{id:${m.id},v:0,c:[${pages.filter((p) => p.module === m).map((p) => `{id:${p.id},v:0}`).join(',')}]}`).join(',')},{id:900,v:0}]}`;
+  const numPages = pages.length;
+  const pageHtml = (p) => {
+    const i = idx(p.file);
+    const prev = pages[i - 1]?.file;
+    const next = pages[i + 1]?.file ?? 'a001_student_dashboard.html';
+    const img = p.module ? `images/${p.module.slug}_${i}.png` : 'images/logo.png';
+    let body;
+    if (p.file === 'a001_student_dashboard.html') {
+      body = `<h1>Dashboard</h1>
+<ul>${modules.map((m) => `<li><a href="#" onclick="trivExitPage('a001_${m.slug}_welcome.html', true); return false;">${m.title}</a> <span id="st${m.id}"></span></li>`).join('')}</ul>
+<button id="final" onclick="action_final()">Final Assessment</button> <span id="lock"></span>
+<script>
+${modules.map((m) => `var VarModule${m.id}Done = new Variable('VarModule${m.id}Done', '0');`).join('\n')}
+function action_final() {
+  if (${modules.map((m) => `VarModule${m.id}Done.equals('1')`).join(' && ')}) trivExitPage('a001_final_assessment_begin.html', true);
+  else document.getElementById('lock').textContent = 'Finish every module first.';
+}
+${modules.map((m) => `document.getElementById('st${m.id}').textContent = VarModule${m.id}Done.equals('1') ? '✓' : '';`).join('\n')}
+</script>`;
+    } else {
+      body = `<h1>${p.module ? p.module.title + ': ' : ''}${p.title}</h1>
+<p>Sample text for ${p.title}.</p>
+<img src="${img}" alt="" width="120">
+<p><button onclick="trivPrevPage()">Back</button> <button onclick="trivNextPage()">Next</button></p>
+${p.last ? `<script>var VarModule${p.module.id}Done = new Variable('VarModule${p.module.id}Done', '0'); VarModule${p.module.id}Done.set('1');</script>` : ''}`;
+    }
+    return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Safety Basics</title>
+<script src="trivantis.js"></script>
+<script src="trivantis-pagetracking.js"></script>
+<script src="js/scorm.js"></script>
+<script>
+var pgID = 'page${p.id}';
+${prev ? `function trivPrevPage() {
+    trivExitPage( '${prev}', true )
+}
+` : 'function trivPrevPage() {}\n'}
+function trivNextPage() {
+    trivExitPage( '${next}', true )
+}
+function postPageShowAction(){
+  trivPageTracking.SetRangeStatus(${p.id},2);
+}
+</script>
+</head><body style="font-family:Arial,sans-serif;padding:24px" onload="postPageShowAction()">
+${body}
+</body></html>
+`;
+  };
+  const allImages = ['images/logo.png', ...pages.map((p, i) => (p.module ? `images/${p.module.slug}_${i}.png` : null)).filter(Boolean)];
+  const manifest = `<?xml version="1.0" encoding="UTF-8"?>
+<!--GENERATED BY:  Lectora-style sample for lectora-clone -->
+<manifest identifier="CourseID" version="1.2" xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2" xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2">
+  <organizations default="CourseID-org">
+    <organization identifier="CourseID-org">
+      <title>Safety Basics</title>
+      <item identifier="I_A001" identifierref="A001">
+        <title>Safety Basics</title>
+      </item>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="A001" type="webcontent" adlcp:scormtype="sco" href="a001index.html">
+      <file href="a001index.html"/>
+${pages.map((p) => `      <dependency identifierref="P_${p.id}"/>`).join('\n')}
+      <dependency identifierref="R_images"/>
+      <dependency identifierref="S_BaseFiles"/>
+    </resource>
+${pages.map((p) => `    <resource identifier="P_${p.id}" type="webcontent" adlcp:scormtype="asset">
+      <file href="${p.file}"/>
+${p.file === 'a001_student_dashboard.html' ? pages.filter((q) => q !== p).map((q) => `      <dependency identifierref="P_${q.id}"/>`).join('\n') + '\n' : ''}    </resource>`).join('\n')}
+    <resource identifier="R_images" type="webcontent" adlcp:scormtype="asset">
+${allImages.map((f) => `      <file href="${f}"/>`).join('\n')}
+    </resource>
+    <resource identifier="S_BaseFiles" type="webcontent" adlcp:scormtype="asset">
+      <file href="trivantis.js"/>
+      <file href="trivantis-pagetracking.js"/>
+      <file href="js/scorm.js"/>
+    </resource>
+  </resources>
+</manifest>
+`;
+  const z = new JSZip();
+  z.file('imsmanifest.xml', manifest);
+  z.file('a001index.html', `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Player</title><script>location.replace('a001_student_dashboard.html');</script></head><body></body></html>`);
+  z.file('trivantis.js', runtime);
+  z.file('trivantis-pagetracking.js', tracking(tree, numPages));
+  z.file('js/scorm.js', api);
+  for (const p of pages) z.file(p.file, pageHtml(p));
+  allImages.forEach((f, i) => z.file(f, png(40 + ((i * 37) % 200), 90, 140)));
+  writeFileSync('samples/lectora-style-scorm12.zip', await z.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+}
+
+console.log('Wrote samples/coffee-basics-scorm12.zip samples/workshop-safety-scorm2004.zip, samples/fire-safety-scripted-scorm12.zip samples/onboarding-modules-scorm2004.zip and samples/lectora-style-scorm12.zip');

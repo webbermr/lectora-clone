@@ -21,6 +21,7 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - `coffee-basics-scorm12.zip`: three-page SCORM 1.2 course, zipped inside a parent folder
 - `workshop-safety-scorm2004.zip`: single-SCO SCORM 2004 course with `xml:base` and sequencing
 - `onboarding-modules-scorm2004.zip`: two modules with a nested section, shared assets and an unlisted file
+- `lectora-style-scorm12.zip`: built the way Lectora publishes (trivExitPage links, page-tracking tree, a dashboard that unlocks the final assessment when every module is done), for trying deletes
 - `fire-safety-scripted-scorm12.zip`: pages drawn by JavaScript (text in JS strings and a data file), for trying Live edit
 
 ## What it does
@@ -58,6 +59,29 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Keyboard: Delete, Ctrl+D duplicate, arrows nudge (Shift = 10px), Alt+click selects parent,
   Esc deselects, Ctrl+Z / Ctrl+Y undo/redo
 - Stage width presets (desktop, laptop, tablet, phone)
+
+**Deleting chapters, sections and pages** (Lectora courses)
+- Pick any mix of chapters, sections and pages in the Title Explorer (Ctrl/⌘-click for several) and
+  press 🗑. A review window shows everything that will change before anything does:
+  - the page files, plus images/audio that only those pages use (anything still used elsewhere is kept)
+  - every Next, Back, menu and jump link that pointed at a deleted page, rewired across the gap:
+    forward links go to the next remaining page, backward links to the previous one, never to the
+    linking page itself
+  - Lectora's visit tracking (`trivantis-pagetracking.js`): deleted pages leave the tree so
+    "visit every page" can still reach 100%, and `numPages` drops by the pages removed
+  - the manifest: their `P_<id>` resources, every `<dependency>` on them, and removed files
+  - **keeping the course finishable**: if a deleted page was the only one setting a flag that other
+    pages check (say, "module 3 done" before the final assessment unlocks), those checks are answered
+    as if the deleted pages had run (`VarModule3Done.equals('1')` becomes `true`), so nothing waits on
+    it forever. This doesn't depend on when the runtime loads saved values from the LMS. It's only done
+    when every use of the flag can be answered; otherwise you get a warning. Shown in the review, and
+    can be switched off
+- Test question pages can't be deleted yet: the test's own definition file isn't updated
+- The course check runs straight after, and the whole delete is one undo step
+
+**Course check** (sidebar **Check** tab)
+- Finds links to pages that aren't in the package, Next/Back buttons that loop or point at their own
+  page, visit tracking that lists missing pages, and manifest problems
 
 **Live edit view** (for pages built by JavaScript)
 - Runs the page with its scripts, like a learner sees it, and lets you click text and images
@@ -128,6 +152,8 @@ Layout:
 src/lib/manifest.ts   imsmanifest.xml parse + edit (keeps unknown XML intact)
 src/lib/structure.ts  which files belong to which module; Lectora chapter recovery
 src/lib/assetRefs.ts  assets a page's source refers to
+src/lib/lectora.ts    Lectora page tracking; delete planning (rewire, tracking, manifest, flags)
+src/lib/courseCheck.ts  broken links, loops, tracking and manifest checks
 src/lib/package.ts    zip import/export
 src/lib/html.ts       scripts-disabled edit copy <-> saved HTML
 src/lib/vfs.ts        Cache Storage + public/sw.js serve project files to iframes
