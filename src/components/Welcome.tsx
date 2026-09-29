@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as actions from '../lib/actions';
 import { deleteProject, listProjects, type ProjectSummary } from '../lib/storage';
+import { forgetPlace, rememberedPlace, store } from '../lib/store';
 
 export function Welcome() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -11,7 +12,7 @@ export function Welcome() {
 
   const refresh = () => listProjects().then(setProjects).catch((e) => setError(String(e)));
   useEffect(() => {
-    void refresh();
+    void refresh().then(() => reopenAfterRefresh());
   }, []);
 
   const run = async (label: string, fn: () => Promise<void>) => {
@@ -114,4 +115,22 @@ export function Welcome() {
       </div>
     </div>
   );
+}
+
+let reopened = false;
+
+/** After a page refresh, go straight back to the project, page and view this tab had open. */
+async function reopenAfterRefresh() {
+  const place = rememberedPlace();
+  if (reopened || !place) return;
+  reopened = true;
+  const known = await listProjects().catch(() => []);
+  if (!known.some((p) => p.id === place.id)) {
+    forgetPlace();
+    return;
+  }
+  await actions.openSavedProject(place.id, place.name);
+  if (store.project?.id !== place.id) return;
+  if (place.path && store.project.files[place.path]) store.openPage(place.path, place.itemId);
+  store.setView(place.view);
 }

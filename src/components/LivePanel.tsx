@@ -12,7 +12,8 @@ import { declaredObjects, hiddenIds, navigatesAway, objectIdOf, objectRoot, page
 export function LivePanel() {
   const lv = useLive();
   const el = lv.selected;
-  if (!el || !el.isConnected) return <PageAssets />;
+  // After the page navigates, the old selection lives in a document with no window: drop it.
+  if (!el || !el.isConnected || !el.ownerDocument.defaultView) return <PageAssets />;
   return <Selected key={lv.getVersion()} el={el} />;
 }
 
@@ -41,6 +42,7 @@ function Selected({ el }: { el: Element }) {
         </div>
       </div>
 
+      <PositionObject el={el} />
       <RemoveObject el={el} />
 
       {asset && (
@@ -181,6 +183,51 @@ function RemoveObject({ el }: { el: Element }) {
           🗑 Remove{scope === 'all' && others.length ? ` from ${pages.length} pages` : ''}
         </button>
         <p className="hint">It's hidden rather than cut out of the page's code, so the page's scripts keep working. Undo, or restore it from this panel with nothing selected.</p>
+      </div>
+    </details>
+  );
+}
+
+/** Where the selected object sits, as the page declares it. Drag it on the page, nudge with arrow keys, or type. */
+function PositionObject({ el }: { el: Element }) {
+  const s = useStore();
+  const lv = useLive();
+  const o = useMemo(() => live.selectedObject(el), [el, s.project?.files]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pages = useMemo(() => (o ? pagesWithObject(s.project!.files, o.id) : []), [o?.id, s.project?.files]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!o) return null;
+  const set = (axis: 'x' | 'y', value: string) => {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n) || n === o.at[axis]) return;
+    void live.moveObject(o.doc, o.id, { ...o.at, [axis]: n });
+  };
+  return (
+    <details className="section position-object" open>
+      <summary>Position</summary>
+      <div className="stack">
+        <div className="xy">
+          {(['x', 'y'] as const).map((axis) => (
+            <label key={axis + o.at[axis]}>
+              {axis.toUpperCase()}
+              <input
+                type="number"
+                defaultValue={o.at[axis]}
+                onBlur={(e) => set(axis, e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+              />
+            </label>
+          ))}
+        </div>
+        {pages.length > 1 && (
+          <div className="scope">
+            <label className="check-row">
+              <input type="radio" checked={lv.moveScope === 'page'} onChange={() => live.setMoveScope('page')} /> Move on this page only
+            </label>
+            <label className="check-row">
+              <input type="radio" checked={lv.moveScope === 'all'} onChange={() => live.setMoveScope('all')} /> Move on all {pages.length} pages that have it
+            </label>
+          </div>
+        )}
+        <p className="hint">Drag it on the page, or use the arrow keys (Shift for 10px). The page's own position for it is updated.</p>
       </div>
     </details>
   );

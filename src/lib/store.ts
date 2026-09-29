@@ -63,6 +63,7 @@ class Store {
 
   emit() {
     this.version++;
+    rememberPlace(this);
     this.listeners.forEach((l) => l());
   }
 
@@ -261,4 +262,46 @@ export function useStore(): Store {
 
 export function newId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+const PLACE_KEY = 'lc-open-project';
+
+export interface OpenPlace {
+  id: string;
+  name: string;
+  path: string | null;
+  itemId: string | null;
+  view: View;
+}
+
+/** Where this tab was, so a refresh reopens the project instead of going back to the project list. */
+function rememberPlace(st: Store) {
+  try {
+    if (!st.project) {
+      sessionStorage.removeItem(PLACE_KEY);
+      return;
+    }
+    const place: OpenPlace = { id: st.project.id, name: st.project.name, path: st.currentPath, itemId: st.currentItemId, view: st.view };
+    const json = JSON.stringify(place);
+    if (sessionStorage.getItem(PLACE_KEY) !== json) sessionStorage.setItem(PLACE_KEY, json);
+  } catch {
+    // storage blocked: a refresh just goes back to the project list
+  }
+}
+
+export function rememberedPlace(): OpenPlace | null {
+  try {
+    const raw = sessionStorage.getItem(PLACE_KEY);
+    return raw ? (JSON.parse(raw) as OpenPlace) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function forgetPlace() {
+  try {
+    sessionStorage.removeItem(PLACE_KEY);
+  } catch {
+    // ignore
+  }
 }
