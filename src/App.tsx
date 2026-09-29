@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CodeView } from './components/CodeView';
+import { DeleteDialog } from './components/DeleteDialog';
 import { EditStage, handleEditorKey } from './components/EditStage';
 import { LiveStage } from './components/LiveStage';
 import { MatchChooser } from './components/MatchChooser';
@@ -62,6 +63,7 @@ export function App() {
         </span>
       </footer>
       <MatchChooser />
+      <DeleteDialog />
       <ProgressWindow />
     </div>
   );
