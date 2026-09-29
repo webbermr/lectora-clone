@@ -203,6 +203,12 @@ export interface ProgressTotalChange {
 
 export interface DeletePlan {
   pages: string[];
+  /** Non-page files deleted as they are (images, documents…), with who still uses them. */
+  otherFiles: { path: string; usedBy: string[] }[];
+  /** Links to a deleted page with no sensible page left to point to; left for the author to decide. */
+  unresolved: { file: string; link: string }[];
+  /** Deleted pages that are the course's start page or linked from many pages. */
+  hubs: { page: string; start: boolean; linkedFrom: number }[];
   /** Edited test XML (plain text); encrypted into `edits` just before applying. */
   testXml: Map<string, string>;
   tests: TestEdit[];
@@ -254,17 +260,24 @@ export function planDelete(
   files: FileMap,
   manifest: ManifestModel | null,
   pagesToDelete: string[],
-  opts: { allowTests?: boolean; keepFinishable?: boolean; tests?: OpenedTests | { error: string } | null } = {},
+  opts: { allowTests?: boolean; keepFinishable?: boolean; tests?: OpenedTests | { error: string } | null; otherFiles?: string[] } = {},
 ): DeletePlan {
   const keepFinishable = opts.keepFinishable ?? true;
   const course = readLectoraCourse(files, manifest);
   const pages = [...new Set(pagesToDelete)].filter((p) => files[p]);
   const del = new Set(pages);
-  const plan: DeletePlan = { pages, testXml: new Map(), tests: [], toc: [], progressTotals: [], satisfied: [], assets: [], rewires: [], edits: new Map(), trackingNodesRemoved: 0, warnings: [] };
+  const plan: DeletePlan = { pages, otherFiles: [], unresolved: [], hubs: [], testXml: new Map(), tests: [], toc: [], progressTotals: [], satisfied: [], assets: [], rewires: [], edits: new Map(), trackingNodesRemoved: 0, warnings: [] };
 
   const protectedHit = pages.filter((p) => PROTECTED.test(basename(p)));
   if (protectedHit.length) {
     plan.blocked = `${protectedHit.join(', ')} is the course's launch file and can't be deleted.`;
+    return plan;
+  }
+  const others = [...new Set(opts.otherFiles ?? [])].filter((f) => files[f] && !pages.includes(f));
+  const runtimeFiles = new Set((manifest?.resources ?? []).filter((r) => /^S_/.test(r.identifier)).flatMap((r) => r.files));
+  const needed = others.filter((f) => f === 'imsmanifest.xml' || PROTECTED.test(basename(f)) || f === TRACKING_FILE || runtimeFiles.has(f) || /(^|\/)(trivantis[\w.-]*|enc|apiwrapper\w*|scofunctions)\.js$/i.test(f) || /_tobj\d+\.txt$/i.test(f));
+  if (needed.length) {
+    plan.blocked = `${needed.slice(0, 3).join(', ')}${needed.length > 3 ? ' and others' : ''} ${needed.length === 1 ? 'is' : 'are'} part of the course's player or tracking, which the course can't run without.`;
     return plan;
   }
   const ids = course.tracking ? allIds(course.tracking.title) : new Map<number, boolean>();
@@ -348,8 +361,25 @@ export function planDelete(
     if (out !== original) plan.edits.set(f, out);
   }
   plan.rewires = [...rewireCount.values()];
-  if (unresolved.size) {
-    plan.warnings.push(`${unresolved.size} link(s) have no page left to point to and were left as they are: ${[...unresolved].slice(0, 5).join('; ')}`);
+  plan.unresolved = [...unresolved].map((u) => {
+    const [file, link] = u.split(' → ');
+    return { file, link };
+  });
+
+  // --- Hubs: the start page, or pages a lot of others link to ------------------------
+  const launch = Object.keys(files).find((f) => /(^|\/)a\d{3}index\.html?$/i.test(f));
+  // Lectora: redirPage = 'a001_…html'; otherwise the first page the launch file names.
+  const launchText = launch ? textOf(files[launch]) : '';
+  const startPage = /redirPage\s*=\s*['"]([^'"]+)['"]/.exec(launchText)?.[1] ?? /['"]([^'"\s]+\.html?)['"]/.exec(launchText)?.[1];
+  // The rewiring pass already saw every file that links to each deleted page.
+  const linkers = new Map<string, Set<string>>();
+  for (const r of plan.rewires) (linkers.get(r.from) ?? linkers.set(r.from, new Set()).get(r.from)!).add(r.file);
+  for (const u of plan.unresolved) (linkers.get(u.link) ?? linkers.set(u.link, new Set()).get(u.link)!).add(u.file);
+  for (const p of pages) {
+    const name = basename(p);
+    const linkedFrom = [...(linkers.get(name) ?? [])].filter((f) => /\.html?$/i.test(f)).length;
+    const start = !!startPage && basename(startPage) === name;
+    if (start || linkedFrom >= Math.max(10, order.length * 0.1)) plan.hubs.push({ page: p, start, linkedFrom });
   }
 
   // --- The test's question list -------------------------------------------------
@@ -407,10 +437,39 @@ export function planDelete(
   const candidates = new Set(pages.flatMap((p) => referencedAssets(p, files)));
   plan.assets = [...candidates].filter((a) => !runtime.has(a) && !stillUsed.has(a.toLowerCase()) && !stillUsed.has(basename(a).toLowerCase())).sort();
 
+  // --- Other files deleted as they are -------------------------------------------------
+  if (others.length) {
+    // One pass over the remaining text files, noting which mention each file's name.
+    const wanted = new Map(others.map((f) => [basename(f).toLowerCase(), f]));
+    const usedBy = new Map<string, Set<string>>(others.map((f) => [f, new Set()]));
+    const gone = new Set([...del, ...others]);
+    for (const g of Object.keys(files)) {
+      if (gone.has(g) || !isTextFile(g) || g === 'imsmanifest.xml') continue;
+      for (const tok of (plan.edits.get(g) ?? textOf(files[g])).match(/[\w\-.%]+\.[A-Za-z0-9]{2,5}\b/g) ?? []) {
+        let t = tok.toLowerCase();
+        try {
+          t = decodeURIComponent(t);
+        } catch {
+          /* keep as written */
+        }
+        const f = wanted.get(basename(t));
+        if (f) usedBy.get(f)!.add(g);
+      }
+    }
+    for (const f of others) plan.otherFiles.push({ path: f, usedBy: [...usedBy.get(f)!].sort() });
+    const inUse = plan.otherFiles.filter((o) => o.usedBy.length);
+    if (inUse.length) {
+      plan.warnings.push(
+        `${inUse.length} of the files you're deleting ${inUse.length === 1 ? 'is' : 'are'} still used elsewhere, so ${inUse.length === 1 ? 'it' : 'they'} will show as missing there: ` +
+          inUse.slice(0, 4).map((o) => `${basename(o.path)} (${o.usedBy.length} file${o.usedBy.length === 1 ? '' : 's'}, e.g. ${basename(o.usedBy[0])})`).join('; ') + '.',
+      );
+    }
+  }
+
   // --- Manifest ---------------------------------------------------------------
   if (files['imsmanifest.xml']) {
     const resourceIds = pages.map((p) => course.idOf.get(p)).filter((x) => x !== undefined).map((id) => `P_${id}`);
-    plan.edits.set('imsmanifest.xml', removeResourcesAndFiles(textOf(files['imsmanifest.xml']), resourceIds, [...pages, ...plan.assets]));
+    plan.edits.set('imsmanifest.xml', removeResourcesAndFiles(textOf(files['imsmanifest.xml']), resourceIds, [...pages, ...plan.assets, ...others]));
   }
 
   // --- Things that could leave the course stuck ------------------------------------
@@ -735,10 +794,21 @@ export function evaluateCheck(op: string, value: string, arg: string | undefined
   return undefined;
 }
 
+/** Point every link to page `from` in `text` at `to` instead (same matching as deletes). */
+export function relinkText(text: string, from: string, to: string): { text: string; count: number } {
+  let count = 0;
+  const re = new RegExp(`(?<![A-Za-z0-9_\\-])${reEscape(from)}(?![A-Za-z0-9_])`, 'g');
+  const out = text.replace(re, () => {
+    count++;
+    return to;
+  });
+  return { text: out, count };
+}
+
 /** Turn a plan into file writes (one undo step). */
 export function planChanges(plan: DeletePlan): { path: string; bytes: Uint8Array | null }[] {
   return [
     ...[...plan.edits].map(([path, text]) => ({ path, bytes: encodeText(text) })),
-    ...[...plan.pages, ...plan.assets].map((path) => ({ path, bytes: null })),
+    ...[...plan.pages, ...plan.assets, ...plan.otherFiles.map((o) => o.path)].map((path) => ({ path, bytes: null })),
   ];
 }

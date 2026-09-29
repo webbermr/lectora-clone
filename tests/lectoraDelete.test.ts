@@ -303,3 +303,42 @@ describe('deleting test questions', () => {
     expect(r.issues.find((i) => i.kind === 'Test')?.message).toContain('a001_test_module_1_q1.html');
   });
 });
+
+describe('main pages, stranded links and other files', () => {
+  it('flags deleting the start page and lists links with nowhere to go', async () => {
+    const files = await load();
+    const plan = planDelete(files, parseManifest(text(files, 'imsmanifest.xml')), ['a001_student_dashboard.html']);
+    expect(plan.hubs[0]).toMatchObject({ page: 'a001_student_dashboard.html', start: true });
+    expect(plan.unresolved).toEqual([{ file: 'a001_getting_started_welcome.html', link: 'a001_student_dashboard.html' }]);
+  });
+
+  it('course check offers the broken link for repointing, and relinkText fixes it', async () => {
+    const { relinkText } = await import('../src/lib/lectora');
+    const files = await load();
+    const plan = planDelete(files, parseManifest(text(files, 'imsmanifest.xml')), ['a001_student_dashboard.html']);
+    const after = apply(files, planChanges(plan));
+    const broken = checkCourse(after, parseManifest(text(after, 'imsmanifest.xml'))).issues.find((i) => i.kind === 'Broken link')!;
+    expect(broken.missing).toEqual(['a001_student_dashboard.html']);
+    const fixed = relinkText(text(after, broken.file!), 'a001_student_dashboard.html', 'a001_toc1.html');
+    expect(fixed.count).toBe(1);
+    const repaired = { ...after, [broken.file!]: new TextEncoder().encode(fixed.text) };
+    expect(checkCourse(repaired, parseManifest(text(repaired, 'imsmanifest.xml'))).issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('deletes other files as they are, says who still uses them, and protects the player', async () => {
+    const files = await load();
+    const m = parseManifest(text(files, 'imsmanifest.xml'));
+    const plan = planDelete(files, m, [], { otherFiles: ['images/logo.png', 'resources/Safety Handbook.pdf'] });
+    expect(plan.blocked).toBeUndefined();
+    const logo = plan.otherFiles.find((o) => o.path === 'images/logo.png')!;
+    expect(logo.usedBy.length).toBeGreaterThan(1);
+    expect(plan.otherFiles.find((o) => o.path === 'resources/Safety Handbook.pdf')!.usedBy).toEqual(['a001_student_dashboard.html']);
+    expect(plan.warnings.join(' ')).toMatch(/still used elsewhere/);
+    const after = apply(files, planChanges(plan));
+    expect(after['images/logo.png']).toBeUndefined();
+    expect(text(after, 'imsmanifest.xml')).not.toContain('images/logo.png');
+    for (const f of ['trivantis.js', 'enc.js', '_tobj700.txt', 'imsmanifest.xml', 'a001index.html', 'trivantis-pagetracking.js']) {
+      expect(planDelete(files, m, [], { otherFiles: [f] }).blocked).toMatch(/player or tracking/);
+    }
+  });
+});

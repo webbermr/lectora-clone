@@ -5,6 +5,7 @@ import { isHtmlFile } from '../lib/paths';
 import { previewLms } from '../lib/scormApi';
 import { useStore } from '../lib/store';
 import { vfsUrl } from '../lib/vfs';
+import { useFollowFrame } from '../lib/frameFollow';
 
 const LIVE_CSS =
   '[data-lc-live-hover]{outline:2px dashed #2f7de1!important;outline-offset:1px!important;cursor:pointer!important}' +
@@ -26,6 +27,7 @@ export function LiveStage({ width }: { width: string }) {
   const path = s.currentPath;
   const [nonce, setNonce] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  useFollowFrame(iframeRef, p.id);
 
   useEffect(() => {
     previewLms.install(window);

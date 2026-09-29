@@ -17,6 +17,8 @@ export interface Issue {
   kind: string;
   message: string;
   file?: string;
+  /** For broken links: the missing page names in `file`, so the UI can offer to repoint them. */
+  missing?: string[];
 }
 
 export interface CheckResult {
@@ -35,7 +37,7 @@ const IGNORE_REF = /^(https?:|mailto:|javascript:|data:|\/\/)|\+/i;
 
 export function checkCourse(files: FileMap, manifest: ManifestModel | null, tests?: ReturnType<typeof openTests>): CheckResult {
   const issues: Issue[] = [];
-  const add = (severity: Severity, kind: string, message: string, file?: string) => issues.push({ severity, kind, message, file });
+  const add = (severity: Severity, kind: string, message: string, file?: string, missing?: string[]) => issues.push({ severity, kind, message, file, missing });
   const pages = Object.keys(files).filter(isHtmlFile);
 
   // --- Links to pages that don't exist ----------------------------------------
@@ -63,7 +65,7 @@ export function checkCourse(files: FileMap, manifest: ManifestModel | null, test
     }
   }
   for (const [f, refs] of broken) {
-    add('error', 'Broken link', `Links to ${[...refs].slice(0, 4).join(', ')}${refs.size > 4 ? ` and ${refs.size - 4} more` : ''}, which ${refs.size === 1 ? "isn't" : "aren't"} in the package. Learners who follow ${refs.size === 1 ? 'it' : 'them'} get a "not found" page.`, f);
+    add('error', 'Broken link', `Links to ${[...refs].slice(0, 4).join(', ')}${refs.size > 4 ? ` and ${refs.size - 4} more` : ''}, which ${refs.size === 1 ? "isn't" : "aren't"} in the package. Learners who follow ${refs.size === 1 ? 'it' : 'them'} get a "not found" page.`, f, [...refs]);
   }
 
   // --- Next/Back buttons: self-links, loops, dead ends --------------------------

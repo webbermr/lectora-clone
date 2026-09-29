@@ -147,7 +147,9 @@ class LiveSession {
       await store.write('Edit text', writes);
     }
     if (applied) {
-      store.setStatus(`Updated ${applied} place${applied > 1 ? 's' : ''} in ${[...where].join(', ')}` + (failed.length ? ` · ${failed.length} not found` : ''));
+      const files = [...where];
+      const inFiles = files.length <= 2 ? files.join(' and ') : `${files.length} files`;
+      store.setStatus(`Updated ${applied} place${applied > 1 ? 's' : ''} in ${inFiles}. Undo with Ctrl+Z (⌘Z).` + (failed.length ? ` · ${failed.length} not found` : ''));
     } else if (failed.length) {
       store.setStatus('Could not find that text in the package source. Try Find & Replace in the sidebar with a shorter phrase.');
     }

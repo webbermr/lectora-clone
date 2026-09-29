@@ -1,10 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as actions from '../lib/actions';
 import { CourseCheckPanel } from './CourseCheckPanel';
 import { FindReplace } from './FindReplace';
+import { isTypingTarget } from './LiveStage';
 import { deleteFlow } from '../lib/deleteFlow';
+import { readLectoraCourse } from '../lib/lectora';
 import { flattenItems, type ItemNode } from '../lib/manifest';
-import { isHtmlFile, isImageFile, isMediaFile, isTextFile } from '../lib/paths';
+import { basename, isHtmlFile, isImageFile, isMediaFile, isTextFile } from '../lib/paths';
 import { store, useStore } from '../lib/store';
 import { buildFileIndex, inferLectoraStructure, isLectoraPackage, pageCount, type FileIndex } from '../lib/structure';
 import { vfsUrl } from '../lib/vfs';
@@ -34,6 +36,16 @@ function TitleExplorer() {
   const [showChapters, setShowChapters] = useState(true);
   // Recovered Lectora items picked for deleting (click, or Ctrl/⌘-click for several).
   const [marked, setMarked] = useState<Set<string>>(() => new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
+  // Esc clears a multi-selection (unless typing or a dialog is open).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || isTypingTarget(e.target) || document.querySelector('.modal-backdrop')) return;
+      setMarked(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const structure = useStructure();
   const index = structure?.manifestIndex;
   const lectora = structure?.lectora ?? null;
@@ -65,11 +77,12 @@ function TitleExplorer() {
   const inferredById = new Map(lectora ? flattenItems(lectora.modules).map((i) => [i.identifier, i]) : []);
   const targets = [...marked].filter((id) => inferredById.has(id));
   if (!targets.length && selected && inferredById.has(selected)) targets.push(selected);
+  // Deleting a chapter and one of its own pages is the same as deleting the chapter.
+  const targetPages = [...new Set(targets.flatMap((id) => flattenItems([inferredById.get(id)!]).map((x) => x.href).filter((h): h is string => !!h)))];
   const deleteInferred = () => {
     const items = targets.map((id) => inferredById.get(id)!);
-    // Deleting a chapter and one of its own pages is the same as deleting the chapter.
-    const pages = [...new Set(items.flatMap((i) => flattenItems([i]).map((x) => x.href).filter((h): h is string => !!h)))];
-    const label = items.length === 1 ? `Delete "${items[0].title}"` : `Delete ${items.length} items`;
+    const pages = targetPages;
+    const label = items.length === 1 ? `Delete "${items[0].title}"` : `Delete ${pages.length} pages`;
     setMarked(new Set());
     void deleteFlow.start(label, pages);
   };
@@ -80,20 +93,49 @@ function TitleExplorer() {
     void actions.deleteItem(selected, alsoFile);
   };
 
+  // Standard multi-select: click = one, Ctrl/⌘ = toggle, Shift = range from the last click.
+  const inferredOrder = lectora ? flattenItems(lectora.modules).map((i) => i.identifier) : [];
   const onRowClick = (item: ItemNode, e: React.MouseEvent) => {
-    if (isInferred(item.identifier) && (e.ctrlKey || e.metaKey)) {
+    const id = item.identifier;
+    if (!isInferred(id)) {
+      setMarked(new Set());
+      store.openPage(item.href ?? null, id);
+      return;
+    }
+    const toggle = e.ctrlKey || e.metaKey;
+    if (e.shiftKey && anchor && inferredOrder.includes(anchor)) {
+      const [a, b] = [inferredOrder.indexOf(anchor), inferredOrder.indexOf(id)].sort((x, y) => x - y);
+      const range = inferredOrder.slice(a, b + 1);
+      setMarked((prev) => new Set([...(toggle ? prev : []), ...range]));
+      return;
+    }
+    setAnchor(id);
+    if (toggle) {
       setMarked((prev) => {
         const next = new Set(prev);
-        if (next.has(item.identifier)) next.delete(item.identifier);
-        else next.add(item.identifier);
+        const under = (n: ItemNode) => flattenItems([n]).map((x) => x.identifier);
+        const covering = [...prev].filter((m) => m !== id && under(inferredById.get(m)!).includes(id));
+        if (!prev.has(id) && !covering.length) {
+          next.add(id);
+          return next;
+        }
+        // Unmarking drops everything under it; a marked parent keeps only its other branches.
+        const drop = new Set(under(item));
+        for (const c of covering) {
+          next.delete(c);
+          for (const x of under(inferredById.get(c)!)) if (!drop.has(x) && !under(inferredById.get(x)!).includes(id)) next.add(x);
+        }
+        for (const x of drop) next.delete(x);
         return next;
       });
       return;
     }
-    setMarked(new Set());
-    store.openPage(item.href ?? null, item.identifier);
+    setMarked(new Set([id]));
+    store.openPage(item.href ?? null, id);
   };
-  const ctx: TreeCtx = { selected, renaming, setRenaming, index, openFiles, toggleFiles, collapsed, setCollapsed: setItemCollapsed, currentPath: s.currentPath, marked, onRowClick };
+  // Pages follow the file on screen (including where Live edit / Preview has navigated to); modules follow the click.
+  const followPath = s.viewingPath ?? (s.currentItemId ? null : s.currentPath);
+  const ctx: TreeCtx = { selected, followPath, renaming, setRenaming, index, openFiles, toggleFiles, collapsed, setCollapsed: setItemCollapsed, currentPath: s.viewingPath ?? s.currentPath, marked: marked.size > 1 ? marked : new Set<string>(), onRowClick };
   const lectoraCtx: TreeCtx | null = lectora ? { ...ctx, index: lectora.index, closedByDefault: true } : null;
   const unlisted = lectora ? lectora.index.unlisted : index.unlisted;
 
@@ -121,9 +163,9 @@ function TitleExplorer() {
         <button
           onClick={del}
           disabled={!editable && !targets.length}
-          title={targets.length > 1 ? `Delete the ${targets.length} selected items` : 'Delete the selected chapter, section or page'}
+          title={targets.length > 1 ? `Review and delete the ${targetPages.length} selected pages` : 'Review and delete the selected chapter, section or page'}
         >
-          🗑{targets.length > 1 ? ` ${targets.length}` : ''}
+          🗑{targets.length > 1 ? ` ${targetPages.length}` : ''}
         </button>
       </div>
       {m.items.length ? (
@@ -146,8 +188,8 @@ function TitleExplorer() {
           </div>
           <p className="hint chapters-note">
             Recovered from Lectora's page file names, since the manifest lists this course as a single unit. Files
-            are matched to pages by what each page's HTML refers to. Ctrl/⌘-click to pick several chapters, sections or
-            pages, then 🗑 to review and delete them.
+            are matched to pages by what each page's HTML refers to. Click, Ctrl/⌘-click or Shift-click to pick chapters,
+            sections or pages (Esc clears), then 🗑 to review and delete them.
           </p>
           {showChapters && (
             <ul className="tree">
@@ -203,10 +245,21 @@ function useStructure() {
   }, [m, files, edits]);
 }
 
+/** Keep the highlighted row in view while the course is being clicked through. */
+function useScrollIntoView<T extends HTMLElement>(active: boolean, key?: unknown) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: 'nearest' });
+  }, [active, key]);
+  return ref;
+}
+
 const isInferred = (id: string | null) => !!id && id.startsWith('lectora:');
 
 interface TreeCtx {
   selected: string | null;
+  /** When set, the page row with this file is the highlighted one. */
+  followPath: string | null;
   renaming: string | null;
   setRenaming: (id: string | null) => void;
   index: FileIndex;
@@ -234,13 +287,17 @@ function TreeItem({ item, depth, ctx }: { item: ItemNode; depth: number; ctx: Tr
   const closedByDefault = !!ctx.closedByDefault && !holdsCurrent;
   const isCollapsed = ctx.collapsed.get(item.identifier) ?? closedByDefault;
   const pages = isModule ? pageCount(item) : 0;
+  const highlighted = ctx.followPath && item.href ? item.href === ctx.followPath : item.identifier === ctx.selected;
+  const rowRef = useScrollIntoView<HTMLDivElement>(highlighted && !!ctx.followPath);
 
   return (
     <li>
       <div
-        className={'tree-row' + (item.identifier === ctx.selected ? ' selected' : '') + (isModule ? ' module' : '') + (ctx.marked.has(item.identifier) ? ' marked' : '')}
+        ref={rowRef}
+        className={'tree-row' + (highlighted ? ' selected' : '') + (isModule ? ' module' : '') + (ctx.marked.has(item.identifier) ? ' marked' : '')}
         style={{ paddingLeft: 4 + depth * 14 }}
         onClick={(e) => ctx.onRowClick(item, e)}
+        onMouseDown={(e) => e.shiftKey && e.preventDefault()}
         onDoubleClick={() => !isInferred(item.identifier) && ctx.setRenaming(item.identifier)}
         title={item.title + '\n' + (item.href ? item.href + item.query : `${pages} page${pages === 1 ? '' : 's'}`)}
       >
@@ -366,9 +423,65 @@ function FileList() {
     !moduleFilter ||
     (moduleFilter === '__none__' ? f !== 'imsmanifest.xml' && !index?.fileModules.has(f) : !!index?.fileModules.get(f)?.some((u) => u.identifier === moduleFilter));
   const shown = files.filter((f) => f.toLowerCase().includes(filter.toLowerCase()) && inModule(f));
+  const shownPath = s.viewingPath ?? s.currentPath;
+  const shownRef = useScrollIntoView<HTMLLIElement>(!!s.viewingPath, shownPath);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
+  // Drop picks for files that no longer exist (deleted, renamed, undone).
+  const pickedNow = [...picked].filter((f) => fileMap?.[f]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || isTypingTarget(e.target) || document.querySelector('.modal-backdrop')) return;
+      setPicked(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Standard multi-select: click = one (and open it), Ctrl/⌘ = toggle, Shift = range in the list as shown.
+  const onRowClick = (f: string, e: React.MouseEvent) => {
+    const toggle = e.ctrlKey || e.metaKey;
+    if (e.shiftKey && anchor && shown.includes(anchor)) {
+      const [a, b] = [shown.indexOf(anchor), shown.indexOf(f)].sort((x, y) => x - y);
+      setPicked((prev) => new Set([...(toggle ? prev : []), ...shown.slice(a, b + 1)]));
+      return;
+    }
+    setAnchor(f);
+    if (toggle) {
+      setPicked((prev) => {
+        const next = new Set(prev);
+        if (next.has(f)) next.delete(f);
+        else next.add(f);
+        return next;
+      });
+      return;
+    }
+    setPicked(new Set([f]));
+    openFile(f);
+  };
+
+  /** Deletes go through the review window: pages get rewired safely, other files are checked for use. */
+  const deleteFiles = (list: string[]) => {
+    const p = store.project!;
+    const order = new Set(readLectoraCourse(p.files, p.manifest).order);
+    const isPage = (f: string) => (order.size ? order.has(f) : isHtmlFile(f) && !/_toc\d*\.html?$/i.test(f));
+    const pages = list.filter(isPage);
+    const others = list.filter((f) => !isPage(f));
+    const label = list.length === 1 ? `Delete ${basename(list[0])}` : `Delete ${list.length} files`;
+    setPicked(new Set());
+    void deleteFlow.start(label, pages, true, others);
+  };
 
   return (
     <div className="panel-body">
+      {pickedNow.length > 1 && (
+        <div className="selection-bar">
+          <b>{pickedNow.length} selected</b>
+          <span className="spacer" />
+          <button className="danger" onClick={() => deleteFiles(pickedNow)}>🗑 Delete…</button>
+          <button onClick={() => setPicked(new Set())} title="Clear the selection (Esc)">Clear</button>
+        </div>
+      )}
       <div className="mini-toolbar">
         <input className="grow" placeholder={`Filter ${files.length} files…`} value={filter} onChange={(e) => setFilter(e.target.value)} />
         <button onClick={() => upload.current?.click()} title="Add files to the package">⤒ Add</button>
@@ -392,11 +505,19 @@ function FileList() {
           <option value="__none__">{structure?.lectora ? 'Not used by any page' : 'Not in any module'}</option>
         </select>
       )}
+      <p className="hint small">Click, Ctrl/⌘-click or Shift-click to select several files (Esc clears).</p>
       <ul className="file-list">
         {shown.map((f) => {
           const users = index?.fileModules.get(f) ?? [];
           return (
-          <li key={f} className={'file-row' + (f === s.currentPath ? ' selected' : '')} onClick={() => openFile(f)} title={f + (users.length ? `\nModule: ${users.map((u) => u.title).join(', ')}` : '')}>
+          <li
+            key={f}
+            ref={f === shownPath ? shownRef : undefined}
+            className={'file-row' + (f === shownPath ? ' selected' : '') + (picked.has(f) && pickedNow.length > 1 ? ' marked' : '')}
+            onClick={(e) => onRowClick(f, e)}
+            onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+            aria-selected={picked.has(f)}
+            title={f + (users.length ? `\nModule: ${users.map((u) => u.title).join(', ')}` : '')}>
             <span>{fileIcon(f)}</span>
             <span className="file-name">{f}</span>
             {modules.length > 0 && users.length > 0 && (
@@ -419,8 +540,7 @@ function FileList() {
                 title="Delete"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (f === 'imsmanifest.xml') return alert('The manifest is required for a SCORM package.');
-                  if (confirm(`Delete ${f}?`)) void actions.deleteProjectFile(f);
+                  deleteFiles(picked.has(f) && pickedNow.length > 1 ? pickedNow : [f]);
                 }}
               >
                 ✕

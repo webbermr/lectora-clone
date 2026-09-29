@@ -9,6 +9,8 @@ import { yieldToPaint } from './task';
 export interface DeleteFlow {
   label: string;
   pages: string[];
+  /** Non-page files (images, documents…) deleted as they are. */
+  otherFiles: string[];
   /** Set flags the deleted pages used to set, so nothing waits on them forever. */
   keepFinishable: boolean;
   stage: 'planning' | 'review' | 'applying' | 'done' | 'error';
@@ -29,26 +31,27 @@ const set = (next: DeleteFlow | null) => {
 };
 
 export const deleteFlow = {
-  async start(label: string, pages: string[], keepFinishable = true) {
-    set({ label, pages, keepFinishable, stage: 'planning' });
+  async start(label: string, pages: string[], keepFinishable = true, otherFiles: string[] = []) {
+    const base = { label, pages, otherFiles, keepFinishable };
+    set({ ...base, stage: 'planning' });
     await yieldToPaint();
     try {
       const p = store.project!;
       opened = openTests(p.files);
-      set({ label, pages, keepFinishable, stage: 'review', plan: planDelete(p.files, p.manifest, pages, { keepFinishable, tests: opened }) });
+      set({ ...base, stage: 'review', plan: planDelete(p.files, p.manifest, pages, { keepFinishable, tests: opened, otherFiles }) });
     } catch (e) {
       console.error(e);
-      set({ label, pages, keepFinishable, stage: 'error', error: (e as Error).message });
+      set({ ...base, stage: 'error', error: (e as Error).message });
     }
   },
 
   setKeepFinishable(on: boolean) {
-    if (state) void deleteFlow.start(state.label, state.pages, on);
+    if (state) void deleteFlow.start(state.label, state.pages, on, state.otherFiles);
   },
 
   async confirm() {
     if (!state?.plan || state.plan.blocked) return;
-    const { label, plan, pages, keepFinishable } = state;
+    const { label, plan, pages, keepFinishable, otherFiles } = state;
     set({ ...state, stage: 'applying' });
     await yieldToPaint();
     try {
@@ -65,12 +68,19 @@ export const deleteFlow = {
       const p = store.project!;
       const check = checkCourse(p.files, p.manifest, openTests(p.files));
       const errors = check.issues.filter((i) => i.severity === 'error').length;
-      store.setStatus(`${label}: ${plan.pages.length} pages removed · course check ${errors ? `found ${errors} problem(s)` : 'passed'}`);
-      set({ label, pages, keepFinishable, stage: 'done', plan, check });
+      store.setStatus(`${label}: ${plan.pages.length + plan.otherFiles.length} removed · course check ${errors ? `found ${errors} problem(s)` : 'passed'}`);
+      set({ label, pages, otherFiles, keepFinishable, stage: 'done', plan, check });
     } catch (e) {
       console.error(e);
-      set({ label, pages, keepFinishable, stage: 'error', error: (e as Error).message });
+      set({ label, pages, otherFiles, keepFinishable, stage: 'error', error: (e as Error).message });
     }
+  },
+
+  /** Run the course check again after fixing something from the results. */
+  recheck() {
+    if (!state || state.stage !== 'done') return;
+    const p = store.project!;
+    set({ ...state, check: checkCourse(p.files, p.manifest, openTests(p.files)) });
   },
 
   close: () => set(null),
