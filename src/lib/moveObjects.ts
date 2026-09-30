@@ -2,6 +2,7 @@
  * Moving Lectora objects. A page declares where each object sits:
  *   text63337 = new ObjText('text63337', null, 320, 9, 505, 25, …)     (x, y, width, height)
  *   text63337.addIe8Attr(320, 9, 505, 25, 0, 0)                         (the same, for old browsers)
+ *   shape66593 = new ObjImage('shape66593', 'images/shape66593.png', 'Rectangle 2', 832, 0, …)
  * Moving an object rewrites those numbers, so the course places it there itself.
  */
 
@@ -10,13 +11,13 @@ export interface Point {
   y: number;
 }
 
-const NUM = '(-?\\d+(?:\\.\\d+)?)';
-const NAME = `(?:null|'(?:[^'\\\\]|\\\\.)*'|"(?:[^"\\\\]|\\\\.)*")`;
+import { declarations, declHead, NUM } from './lectoraDecl';
+
 const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const declRe = (id: string, flags = 'g') => new RegExp(`(\\bnew\\s+Obj\\w+\\(\\s*'${reEscape(id)}'\\s*,\\s*${NAME}\\s*,\\s*)${NUM}(\\s*,\\s*)${NUM}`, flags);
+// Any number of text arguments come before the position (images give their file first).
+const declRe = (id: string, flags = 'g') => new RegExp(`(${declHead(id)})${NUM}(\\s*,\\s*)${NUM}`, flags);
 const ie8Re = (id: string) => new RegExp(`(\\b${reEscape(id)}\\.addIe8Attr\\(\\s*)${NUM}(\\s*,\\s*)${NUM}`, 'g');
-const ALL_DECLS = new RegExp(`\\bnew\\s+Obj\\w+\\(\\s*'([\\w-]+)'\\s*,\\s*${NAME}\\s*,\\s*${NUM}\\s*,\\s*${NUM}`, 'g');
 
 /** Where the page first declares an object, or null if it doesn't. */
 export function declaredPosition(html: string, id: string): Point | null {
@@ -27,7 +28,7 @@ export function declaredPosition(html: string, id: string): Point | null {
 /** Every object's declared position on a page. */
 export function declaredPositions(html: string): Map<string, Point> {
   const out = new Map<string, Point>();
-  for (const m of html.matchAll(ALL_DECLS)) if (!out.has(m[1])) out.set(m[1], { x: Number(m[2]), y: Number(m[3]) });
+  for (const [id, d] of declarations(html)) out.set(id, { x: d.x, y: d.y });
   return out;
 }
 

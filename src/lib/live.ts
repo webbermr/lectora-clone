@@ -287,15 +287,110 @@ class LiveSession {
     return root && at ? { doc, page, id: root.id, element: root.element, at } : null;
   }
 
-  /** Arrow keys: move the selected object by a few pixels. */
-  async nudge(dx: number, dy: number): Promise<boolean> {
-    const o = this.selectedObject();
-    if (!o) return false;
-    await this.moveObject(o.doc, o.id, { x: o.at.x + dx, y: o.at.y + dy });
+  // Moves show on screen at once and are saved when they stop: on drop, or a moment after the
+  // last arrow key. So dragging is smooth, held arrow keys never lose steps, and a burst of
+  // nudges is one save and one undo step.
+
+  /** A move shown on screen, not yet saved. */
+  private pending: { doc: Document; id: string; from: Point; dx: number; dy: number; timer?: ReturnType<typeof setTimeout>; selection?: Element | null } | null = null;
+  /** Moves being saved, in order; until each lands, the page source still has the old position. */
+  private inFlight: { doc: Document; id: string; to: Point }[] = [];
+  private saveChain: Promise<void> = Promise.resolve();
+
+  /** Where an object is (or is about to be) saved, counting moves still being saved. */
+  private savedPosition(doc: Document, id: string, declared: Point): Point {
+    for (let i = this.inFlight.length - 1; i >= 0; i--) {
+      const m = this.inFlight[i];
+      if (m.doc === doc && m.id === id) return m.to;
+    }
+    return declared;
+  }
+
+  /** Start (or continue) moving an object on screen; returns where it started. */
+  beginMove(doc: Document, id: string, declared: Point): Point {
+    if (this.pending && this.pending.doc === doc && this.pending.id === id) return this.pending.from;
+    if (this.pending) void this.commitMove();
+    const from = this.savedPosition(doc, id, declared);
+    this.pending = { doc, id, from, dx: 0, dy: 0 };
+    return from;
+  }
+
+  /** Show the moving object `dx, dy` from where it started. */
+  previewMove(dx: number, dy: number) {
+    const p = this.pending;
+    if (!p) return;
+    clearTimeout(p.timer);
+    p.dx = Math.round(dx);
+    p.dy = Math.round(dy);
+    this.drawAt(p.doc, p.id, { x: p.from.x + p.dx, y: p.from.y + p.dy });
+  }
+
+  /** Arrow keys: move the selected object a few pixels, saving shortly after the last press. */
+  nudge(dx: number, dy: number): boolean {
+    // A held key repeats every ~30 ms; while the same selection is moving, skip looking it up again.
+    if (!this.pending || this.pending.selection !== this.selected) {
+      const o = this.selectedObject();
+      if (!o) return false;
+      this.beginMove(o.doc, o.id, o.at);
+      this.pending!.selection = this.selected;
+    }
+    const p = this.pending!;
+    this.previewMove(p.dx + dx, p.dy + dy);
+    p.timer = setTimeout(() => void this.commitMove(), 400);
     return true;
   }
 
-  async moveObject(doc: Document, id: string, to: Point) {
+  /** Move straight to a position (the Position panel's X / Y). */
+  async moveTo(doc: Document, id: string, declared: Point, to: Point) {
+    const from = this.beginMove(doc, id, declared);
+    this.previewMove(to.x - from.x, to.y - from.y);
+    await this.commitMove();
+  }
+
+  /** Save the move being shown, after any earlier ones. */
+  async commitMove() {
+    const p = this.pending;
+    if (!p) return;
+    clearTimeout(p.timer);
+    this.pending = null;
+    if (!p.dx && !p.dy) return;
+    const entry = { doc: p.doc, id: p.id, to: { x: p.from.x + p.dx, y: p.from.y + p.dy } };
+    this.inFlight.push(entry);
+    const run = this.saveChain.then(() => this.moveObject(p.doc, p.id, entry.to));
+    this.saveChain = run.catch(() => undefined);
+    try {
+      await run;
+    } finally {
+      this.inFlight.splice(this.inFlight.indexOf(entry), 1);
+      this.syncMoved();
+    }
+  }
+
+  /** Draw an object at a position without saving it. */
+  private drawAt(doc: Document, id: string, at: Point) {
+    const el = doc.getElementById(id) as HTMLElement | null;
+    if (!el) return;
+    const built = this.builtPosition(doc, id, el);
+    if (!built) return;
+    const value = at.x !== built.x || at.y !== built.y ? `${at.x - built.x}px ${at.y - built.y}px` : '';
+    for (const part of objectParts(doc, id, el)) if (part.style.translate !== value) part.style.translate = value;
+  }
+
+  /** Where the running page built an object (its declared position when first seen). */
+  private builtPosition(doc: Document, id: string, el: Element): Point | null {
+    let built = this.builtAt.get(el);
+    if (!built) {
+      const files = store.project?.files;
+      const page = this.pageOf(doc);
+      const now = files && page && files[page] ? declaredPosition(textOf(files[page]), id) : null;
+      if (!now) return null;
+      this.builtAt.set(el, (built = now));
+    }
+    return built;
+  }
+
+  /** Save an object's new position (and its copies' when moving on all pages). */
+  private async moveObject(doc: Document, id: string, to: Point) {
     const files = store.project!.files;
     const page = this.pageOf(doc);
     if (!page || !files[page]) return;
@@ -309,7 +404,6 @@ class LiveSession {
     }
     if (!writes.length) return;
     await store.write(`Move ${id}`, writes, { fromStage: true });
-    this.syncMoved();
     store.setStatus(`Moved ${id} to ${Math.round(to.x)}, ${Math.round(to.y)}${writes.length > 1 ? ` on ${writes.length} pages` : ''}. Undo with Ctrl+Z (⌘Z).`);
     this.emit();
   }
@@ -329,6 +423,8 @@ class LiveSession {
       const page = this.pageOf(doc);
       if (!page || !files[page] || !isHtmlFile(page)) continue;
       for (const [id, now] of declaredPositions(textOf(files[page]))) {
+        // Leave an object alone while it's being moved or saved; the screen is ahead of the file.
+        if ((this.pending?.doc === doc && this.pending.id === id) || this.inFlight.some((m) => m.doc === doc && m.id === id)) continue;
         const el = doc.getElementById(id) as HTMLElement | null;
         if (!el) continue;
         let built = this.builtAt.get(el);

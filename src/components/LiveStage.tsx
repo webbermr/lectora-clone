@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { live, objectParts, textNodesOf, useLive } from '../lib/live';
+import { live, textNodesOf, useLive } from '../lib/live';
 import { flattenItems } from '../lib/manifest';
 import { isHtmlFile } from '../lib/paths';
 import { previewLms } from '../lib/scormApi';
@@ -128,10 +128,8 @@ export function nudgeShortcut(e: KeyboardEvent): boolean {
   const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
   if (!dir || e.ctrlKey || e.metaKey || e.altKey || live.mode !== 'select' || !live.selected) return false;
   if (isTypingTarget(e.target) || document.querySelector('.modal-backdrop')) return false;
-  if (!live.selectedObject()) return false;
   const step = e.shiftKey ? 10 : 1;
-  void live.nudge(dir[0] * step, dir[1] * step);
-  return true;
+  return live.nudge(dir[0] * step, dir[1] * step);
 }
 
 function wireTree(doc: Document, wired: WeakSet<Document>) {
@@ -247,38 +245,61 @@ function wireDocument(doc: Document) {
     e.stopImmediatePropagation();
   };
 
-  // Drag the selected object to move it. The page's declared position is rewritten on drop.
-  let drag: { id: string; parts: (HTMLElement | SVGElement)[]; base: [number, number][]; x0: number; y0: number; at: { x: number; y: number }; scale: number; dx: number; dy: number; moved: boolean } | null = null;
+  // Drag the selected object to move it. It follows the pointer on screen and is saved on drop.
+  let drag: { x0: number; y0: number; scale: number; moved: boolean; pointer: number; target: Element } | null = null;
   let justDragged = false;
+  let frame = 0;
+  let last: PointerEvent | null = null;
   const onDragStart = (e: PointerEvent) => {
     if (!active() || editing || e.button !== 0) return;
     const sel = live.selectedObject();
     const hit = elementOf(e.target);
     if (!sel || sel.doc !== doc || !hit || live.selectedObject(hit)?.id !== sel.id) return;
+    live.beginMove(doc, sel.id, sel.at);
     // Lectora scales the page to fit; convert screen pixels to the page's own.
     const pageDiv = doc.getElementById('pageDIV') as HTMLElement | null;
     const scale = pageDiv?.offsetWidth ? pageDiv.getBoundingClientRect().width / pageDiv.offsetWidth || 1 : 1;
-    const parts = objectParts(doc, sel.id, sel.element);
-    const base = parts.map((p) => (p.style.translate || '0px 0px').split(/\s+/).map((v) => parseFloat(v) || 0).concat(0).slice(0, 2) as [number, number]);
-    drag = { id: sel.id, parts, base, x0: e.clientX, y0: e.clientY, at: sel.at, scale, dx: 0, dy: 0, moved: false };
+    drag = { x0: e.clientX, y0: e.clientY, scale, moved: false, pointer: e.pointerId, target: hit };
+    // Keep getting the pointer even if it leaves the object (or the page) mid-drag.
+    try {
+      hit.setPointerCapture(e.pointerId);
+    } catch {
+      // not capturable; window listeners still see moves inside the page
+    }
   };
   const onDragMove = (e: PointerEvent) => {
     if (!drag) return;
-    drag.dx = Math.round((e.clientX - drag.x0) / drag.scale);
-    drag.dy = Math.round((e.clientY - drag.y0) / drag.scale);
-    if (!drag.moved && Math.abs(drag.dx) < 3 && Math.abs(drag.dy) < 3) return;
+    const dx = (e.clientX - drag.x0) / drag.scale;
+    const dy = (e.clientY - drag.y0) / drag.scale;
+    if (!drag.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
     drag.moved = true;
-    const d = drag;
-    d.parts.forEach((p, i) => (p.style.translate = `${d.base[i][0] + d.dx}px ${d.base[i][1] + d.dy}px`));
     e.preventDefault();
+    // One update per frame, however many pointer events arrive.
+    last = e;
+    if (!frame) {
+      frame = win.requestAnimationFrame(() => {
+        frame = 0;
+        if (!drag || !last) return;
+        live.previewMove((last.clientX - drag.x0) / drag.scale, (last.clientY - drag.y0) / drag.scale);
+      });
+    }
   };
-  const onDragEnd = () => {
+  const onDragEnd = (e?: PointerEvent) => {
     const d = drag;
     drag = null;
-    if (!d?.moved) return;
+    if (!d) return;
+    if (frame) win.cancelAnimationFrame(frame);
+    frame = 0;
+    try {
+      d.target.releasePointerCapture(d.pointer);
+    } catch {
+      // already released
+    }
+    if (!d.moved) return;
+    if (e) live.previewMove((e.clientX - d.x0) / d.scale, (e.clientY - d.y0) / d.scale);
     justDragged = true;
     setTimeout(() => (justDragged = false), 0);
-    void live.moveObject(doc, d.id, { x: d.at.x + d.dx, y: d.at.y + d.dy });
+    void live.commitMove();
   };
 
   const onOver = (e: Event) => setHover(active() && !editing ? elementOf(e.target) : null);
@@ -290,7 +311,7 @@ function wireDocument(doc: Document) {
   win.addEventListener('pointerdown', onDragStart, opts);
   win.addEventListener('pointermove', onDragMove, opts);
   win.addEventListener('pointerup', onDragEnd, opts);
-  win.addEventListener('pointercancel', () => (drag = null), opts);
+  win.addEventListener('pointercancel', () => onDragEnd(), opts);
   // Block the course's own handlers so selecting a button doesn't press it.
   for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'submit', 'dragstart', 'contextmenu']) {
     win.addEventListener(type, swallow, opts);

@@ -86,3 +86,10 @@ describe('removing objects from a page', () => {
     expect(pageFromObjectIds(['pageDIV', 'something'], files)).toBeNull();
   });
 });
+
+describe('image object names', () => {
+  it("uses Lectora's name, not the image file", () => {
+    const d = declaredObjects("shape66593 = new ObjImage('shape66593','images/shape66593.png','Rectangle 2',832,0,178,58,1,71,'div','',0 )");
+    expect(d.get('shape66593')).toEqual({ id: 'shape66593', kind: 'ObjImage', name: 'Rectangle 2' });
+  });
+});

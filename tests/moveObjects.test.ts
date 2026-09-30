@@ -35,3 +35,14 @@ describe('moving objects', () => {
     expect(moved).toContain("new ObjText('text63337',null,10,20,300,25)");
   });
 });
+
+describe('moving image objects', () => {
+  const img = `shape66593 = new ObjImage('shape66593','images/shape66593.png','Rectangle 2',832,0,178.000000,58.000000,1,71,'div','',0 )
+shape66593.addIe8Attr(832, 0, 178, 58, 0, 0)`;
+  it('reads and rewrites the position after the file and name', () => {
+    expect(declaredPosition(img, 'shape66593')).toEqual({ x: 832, y: 0 });
+    const moved = moveInSource(img, 'shape66593', { x: 800, y: 10 });
+    expect(moved).toContain("new ObjImage('shape66593','images/shape66593.png','Rectangle 2',800,10,178.000000");
+    expect(moved).toContain('shape66593.addIe8Attr(800, 10, 178, 58, 0, 0)');
+  });
+});

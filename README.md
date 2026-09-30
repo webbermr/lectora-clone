@@ -133,13 +133,15 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   with a rule in the page's own `<style id="lc-removed">` block rather than cut out of the code,
   because the page's scripts still show, hide and animate them by id. With nothing selected, the
   panel lists what's been removed on the page, with Restore buttons
-- **Move** objects: drag the selected object, nudge it with the arrow keys (Shift: 10px), or type an
-  exact X/Y in the Position panel. Lectora's page declares each object's position
+- **Move** objects: drag the selected object, nudge it with the arrow keys (Shift: 10px; hold to keep
+  going), or type an exact X/Y in the Position panel. It moves on screen straight away and is saved
+  when you stop (on drop, or a moment after the last key), so a burst of nudges is one undo step. Lectora's page declares each object's position
   (`new ObjText('text63337', null, 320, 9, …)` and `addIe8Attr(320, 9, …)`); those numbers are
   rewritten, so the course places the object there itself. An object repeated on many pages moves on
   all of them by default (or on this page only). "The same object" means the same id, or, since
   Lectora makes a separate copy per chapter (the copyright line is `text236596` in one chapter and
-  `text236384` in another), the same kind and size at the same spot with the same text, name or image.
+  `text236384` in another), the same kind and size at the same spot with the same text, picture
+  (compared by the image's contents, since each copy gets its own file) or name.
   Only copies at the same spot move; a page that placed it elsewhere (a different layout) keeps its own.
   Remove and text edits use the same matching
 - Editing text that belongs to an object repeated across pages (a copyright line, a header) ticks
@@ -322,6 +324,7 @@ src/lib/frameFollow.ts  Follows the page a Live edit / Preview frame has navigat
 src/lib/removeObjects.ts  Hiding page objects by id (Live edit Remove / Restore)
 src/lib/pageIdentity.ts   Which page a running document shows (address, or Lectora objects)
 src/lib/syncRead.ts       Answers course pages' synchronous file requests (with public/vfs-sync.js)
+src/lib/lectoraDecl.ts    Reading Lectora object declarations (id, name, image, position)
 src/lib/moveObjects.ts    Reading and rewriting Lectora objects' declared positions
 src/lib/objectTwins.ts    The same object on other pages (same id, or a per-chapter copy)
 src/components/       React UI (ribbon, explorer, stage, properties)
