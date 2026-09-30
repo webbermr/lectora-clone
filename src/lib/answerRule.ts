@@ -5,15 +5,17 @@
  * it as unanswered while that is empty or "~~~null~~~". The editor adds a small script to the page that hides
  * the Next button(s) until either that variable has a value or a choice is picked / text entered on the page
  * (compared with how each input was when the page opened, so pre-set values don't count).
- * Then it steps aside, and Next behaves as Lectora made it (it may still wait for narration, say). Back, the
- * table of contents and auto-advance are untouched.
+ * Then it steps aside, and Next behaves as Lectora made it (it may still wait for narration, say).
+ * Until then it also stops the page moving itself on to the next page (auto-advance when the narration ends):
+ * a move there that no click or key press asked for is dropped. Back, the table of contents and moves to
+ * other pages (a session timeout, say) are untouched.
  *
  * Settings live in the page itself, in `<script id="lc-answer-rule" data-rule="required|optional"
  * data-set="page|default">`: "page" is a choice made for that page, "default" came from the course default.
  * The course default is "required" when any page carries a default-set required rule, otherwise "not required".
  */
 import { textOf } from './assetRefs';
-import { nextButtons } from './courseRules';
+import { forwardNavigation } from './courseRules';
 import { openTests } from './lectoraTest';
 import type { FileMap } from './package';
 import { basename, isHtmlFile } from './paths';
@@ -22,8 +24,8 @@ import { partIds } from './removeObjects';
 export type AnswerRule = 'required' | 'optional';
 
 export interface QuestionPage {
-  /** How it was recognised: listed in the test file, or by its file name. */
-  source: 'test' | 'name';
+  /** How it was recognised: listed in the test file, a Lectora question on the page, or its file name. */
+  source: 'test' | 'content' | 'name';
   /** e.g. "Final test question" or "Quiz page (by its name)". */
   label: string;
   /** Answer variables Lectora uses for the page's questions (test pages). */
@@ -35,7 +37,23 @@ const QUIZ_NAME = /(^|_)(quiz|question|questions|knowledge_?check|kc|self_?check
 
 const questionCache = new WeakMap<FileMap, Map<string, QuestionPage>>();
 
-/** Pages with a question: every page the test lists (not its results page), plus pages named like quizzes. */
+/** A page Lectora put a question on declares it: `var trivQuestionArray=[qu166063];`. */
+const HAS_QUESTION = /\btrivQuestionArray\s*=\s*\[\s*[\w$]/;
+
+/**
+ * The variables a page's questions keep their answers in. Lectora writes one updater per question:
+ *   function Update_qu166063(value) { if(typeof(value) !== "undefined")  VarQUIZ_M3_P7.set(value) …
+ */
+export function answerVariables(html: string): string[] {
+  const out = new Set<string>();
+  for (const m of html.matchAll(/function\s+Update_qu\w+\s*\([^)]*\)\s*\{[^{}]{0,200}?\b([A-Za-z_$][\w$]*)\.set\(/g)) out.add(m[1]);
+  return [...out];
+}
+
+/**
+ * Pages with a question: every page the test lists (not its results page), every page with a Lectora
+ * question on it (module quizzes), and pages named like quizzes.
+ */
 export function questionPages(files: FileMap): Map<string, QuestionPage> {
   const cached = questionCache.get(files);
   if (cached) return cached;
@@ -52,6 +70,11 @@ export function questionPages(files: FileMap): Map<string, QuestionPage> {
         out.set(page, { source: 'test', label: 'Test question', vars });
       }
     }
+  }
+  for (const page of byName.values()) {
+    if (out.has(page)) continue;
+    const html = textOf(files[page]);
+    if (HAS_QUESTION.test(html)) out.set(page, { source: 'content', label: 'Quiz question', vars: answerVariables(html) });
   }
   for (const [name, page] of byName) {
     if (!out.has(page) && QUIZ_NAME.test(name.replace(/\.html?$/i, '.'))) out.set(page, { source: 'name', label: 'Quiz page (recognised by its name)', vars: [] });
@@ -74,30 +97,60 @@ export function readRule(html: string): PageRule | null {
 }
 
 /** The script that keeps Next hidden until answered. ES5, so it runs in any LMS browser. */
-function guardScript(nextIds: string[], vars: string[]): string {
+function guardScript(nextIds: string[], vars: string[], targets: string[]): string {
   const hide = nextIds.flatMap((id) => partIds(id)).map((id) => `#${id}`).join(',');
   return `(function(){
-  var vars=${JSON.stringify(vars)}, doc=document, page=window.pgID;
+  var vars=${JSON.stringify(vars)}, targets=${JSON.stringify(targets)}, doc=document, page=window.pgID, done=false;
   if(doc.getElementById('lc-answer-guard'))doc.getElementById('lc-answer-guard').parentNode.removeChild(doc.getElementById('lc-answer-guard'));
   var st=doc.createElement('style');st.id='lc-answer-guard';st.appendChild(doc.createTextNode(${JSON.stringify(`${hide}{visibility:hidden!important}`)}));
   (doc.head||doc.documentElement).appendChild(st);
   // Inputs are compared with how they were when first seen, so pre-set choices (a default radio in an
   // options popup) don't count, and custom-drawn choices (hidden inputs) still do when picked.
   function state(e){var t=(e.type||'').toLowerCase();return t=='radio'||t=='checkbox'?(e.checked?'1':'0'):e.tagName=='SELECT'?String(e.selectedIndex):String(e.value||'');}
+  var bases={};
   function answered(){
     for(var i=0;i<vars.length;i++){var v=window[vars[i]];if(v&&v.getValue){var x=String(v.getValue());if(x&&x!='~~~null~~~')return true;}}
     var els=doc.querySelectorAll('input,textarea,select');
     for(i=0;i<els.length;i++){
       var e=els[i],t=(e.type||'').toLowerCase();if(t=='hidden'||t=='button'||t=='submit'||t=='image'||t=='reset')continue;
-      var now=state(e),base=e.getAttribute('data-lc-base');
-      if(base===null){e.setAttribute('data-lc-base',now);continue;}
+      // Kept by id where there is one, so a choice Lectora redraws is still compared with how it started.
+      var now=state(e),key=e.id?'#'+e.id:null,base=key?bases[key]:e.getAttribute('data-lc-base');
+      if(base===undefined||base===null){if(key)bases[key]=now;else e.setAttribute('data-lc-base',now);continue;}
       if(now!==base&&now!=='0'&&now.replace(/\s/g,'')!==''&&now!=='-1')return true;
     }
     return false;
   }
+  // Auto-advance: while unanswered, a move to the next page that no click, tap or key press asked for is dropped.
+  var lastGesture=0;
+  function gesture(){lastGesture=new Date().getTime();}
+  var kinds=['mousedown','mouseup','click','touchstart','touchend','pointerdown','pointerup','keydown','keyup'];
+  for(var k=0;k<kinds.length;k++)doc.addEventListener(kinds[k],gesture,true);
+  function file(u){return String(u||'').replace(/^\\s+|\\s+$/g,'').split('#')[0].split('?')[0].split('/').pop();}
+  function byUser(){var e=window.event;return (e&&/^(mouse|click|touch|pointer|key)/.test(e.type))||new Date().getTime()-lastGesture<1000;}
+  var real=null,wrapper=null;
+  function wrap(){
+    if(real||typeof window.trivExitPage!='function')return;
+    real=window.trivExitPage;
+    wrapper=function(u){
+      if(!done&&!byUser())for(var i=0;i<targets.length;i++)if(file(u)==targets[i])return;
+      return real.apply(this,arguments);
+    };
+    window.trivExitPage=wrapper;
+  }
+  function finish(){
+    if(done)return;
+    done=true;clearInterval(timer);if(st.parentNode)st.parentNode.removeChild(st);
+    for(var k=0;k<kinds.length;k++)doc.removeEventListener(kinds[k],gesture,true);
+    if(real&&window.trivExitPage===wrapper)window.trivExitPage=real;
+  }
+  // A page player swaps pages in one window: the last page's guard stands down before this one starts.
+  if(typeof window.__lcAnswerGuard=='function')window.__lcAnswerGuard();
+  window.__lcAnswerGuard=finish;
+  wrap();
   var timer=setInterval(function(){
+    wrap();
     var gone=page!==undefined&&window.pgID!==page;
-    if(gone||answered()){clearInterval(timer);if(st.parentNode)st.parentNode.removeChild(st);}
+    if(gone||answered())finish();
   },250);
 })();`;
 }
@@ -112,9 +165,9 @@ export function setRule(files: FileMap, page: string, rule: PageRule | null): st
   if (!rule) return without;
   let script = '';
   if (rule.rule === 'required') {
-    const next = nextButtons(files, page).map((b) => b.id);
-    if (!next.length) return null;
-    script = guardScript(next, questionPages(files).get(page)?.vars ?? []);
+    const forward = forwardNavigation(files, page);
+    if (!forward.buttons.length) return null;
+    script = guardScript(forward.buttons.map((b) => b.id), [...new Set([...(questionPages(files).get(page)?.vars ?? []), ...answerVariables(html)])], forward.targets);
   }
   const block = `<script id="lc-answer-rule" data-rule="${rule.rule}" data-set="${rule.set}">${script}</script>\n`;
   const end = /<\/body\s*>/i.exec(without);

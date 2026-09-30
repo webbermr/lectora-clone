@@ -491,15 +491,24 @@ export function reportText(r: RulesReport, courseName: string): string {
  * `trivNextPage` target), directly or behind conditions. Used to hide Next until a question is answered.
  */
 export function nextButtons(files: FileMap, page: string): { id: string; label: string }[] {
-  if (!files[page]) return [];
+  return forwardNavigation(files, page).buttons;
+}
+
+/** The Next buttons plus the file names "the next page" goes to (for blocking an automatic move there). */
+export function forwardNavigation(files: FileMap, page: string): { buttons: { id: string; label: string }[]; targets: string[] } {
+  if (!files[page]) return { buttons: [], targets: [] };
   const model = buildModel(files, page, []);
-  const out: { id: string; label: string }[] = [];
+  const buttons: { id: string; label: string }[] = [];
+  const targets = new Set<string>();
+  const own = /trivExitPage\(\s*'([^']*)'/.exec(model.funcs.get('trivNextPage') ?? '')?.[1];
+  if (own) targets.add(basename(own.split('#')[0]));
   for (const name of model.funcs.keys()) {
     const m = /^([\w$]+?)onUp$/.exec(name);
     if (!m) continue;
     const body = model.funcs.get(name) ?? '';
-    const forward = /\btrivNextPage\s*\(/.test(body) || effectsOf(model, name).some((e) => e.kind === 'jump' && model.pageLabel(e.target) === 'the next page');
-    if (forward) out.push({ id: m[1], label: model.label(m[1]) });
+    const jumps = effectsOf(model, name).filter((e) => e.kind === 'jump' && model.pageLabel(e.target) === 'the next page');
+    for (const j of jumps) if (j.kind === 'jump') targets.add(basename(j.target.split('#')[0]));
+    if (/\btrivNextPage\s*\(/.test(body) || jumps.length) buttons.push({ id: m[1], label: model.label(m[1]) });
   }
-  return out;
+  return { buttons, targets: [...targets] };
 }

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readScormZip } from '../src/lib/package';
-import { applyDefault, courseDefault, questionPages, readRule, setRule } from '../src/lib/answerRule';
+import { answerVariables, applyDefault, courseDefault, questionPages, readRule, setRule } from '../src/lib/answerRule';
 import { encodeText } from '../src/lib/text';
 
 // A Lectora-style page with a Next button that goes to the page's next page (names invented).
@@ -122,5 +122,57 @@ describe('the script on the page', () => {
     (window as unknown as { pgID: string }).pgID = 'p2';
     vi.advanceTimersByTime(300);
     expect(document.getElementById('lc-answer-guard')).toBeNull();
+  });
+
+  it('stops the narration auto-advancing to the next page until answered, but not a click or other pages', () => {
+    vi.useFakeTimers();
+    const w = window as unknown as { trivExitPage: (u: string) => void; pgID?: string; __lcAnswerGuard?: unknown };
+    delete w.pgID;
+    delete w.__lcAnswerGuard;
+    const went: string[] = [];
+    w.trivExitPage = (u: string) => went.push(u);
+    document.body.innerHTML = '<div id="button9"></div><input type="radio" name="q">';
+    run(setRule(files(), 'a001_code_quiz_question_1.html', { rule: 'required', set: 'page' })!);
+    vi.advanceTimersByTime(300);
+    vi.advanceTimersByTime(2000); // no gesture for a while, like narration ending
+    w.trivExitPage('a001_code_summary.html'); // auto-advance: dropped
+    w.trivExitPage('a001_timeout.html'); // somewhere else (a session timeout): allowed
+    expect(went).toEqual(['a001_timeout.html']);
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    w.trivExitPage('a001_code_summary.html'); // a click (a table of contents entry): allowed
+    vi.advanceTimersByTime(2000);
+    (document.querySelector('input') as HTMLInputElement).checked = true;
+    vi.advanceTimersByTime(300);
+    w.trivExitPage('a001_code_summary.html'); // answered: the page may move on
+    expect(went).toEqual(['a001_timeout.html', 'a001_code_summary.html', 'a001_code_summary.html']);
+  });
+
+  it('finds module quiz pages by the Lectora question on them, and the variable the answer goes in', () => {
+    // A quiz page named like any other, with a Submit button that scores the answer and moves on.
+    const quiz = `<html><head><script>
+var pgID = 'pq';
+function trivNextPage() {
+    trivExitPage( 'a001_after.html', true )
+}
+function action2(fn){
+    trivExitPage('a001_after.html',true);
+}
+function button7onUp() {
+  action2();
+}
+function Update_qu55(value) {
+ if(typeof(value) !== "undefined")  VarQUIZ_A1.set(value)
+  var val = VarQUIZ_A1.getValue()
+}
+</script></head><body><script>
+button7 = new ObjButton('button7', 'SUBMIT',373,404,118,42,1,108,'div','',1,0)
+var trivQuestionArray=[qu55];
+</script></body></html>`;
+    const f = { ...files(), 'a001_communications_scenario.html': encodeText(quiz) };
+    expect(answerVariables(quiz)).toEqual(['VarQUIZ_A1']);
+    expect(questionPages(f).get('a001_communications_scenario.html')).toMatchObject({ source: 'content', vars: ['VarQUIZ_A1'] });
+    const out = setRule(f, 'a001_communications_scenario.html', { rule: 'required', set: 'page' })!;
+    expect(out).toContain('var vars=["VarQUIZ_A1"], targets=["a001_after.html"]');
+    expect(out).toContain('#button7');
   });
 });
