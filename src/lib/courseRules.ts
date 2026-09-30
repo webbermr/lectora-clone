@@ -57,11 +57,34 @@ interface PageModel {
 
 // ---- reading one page ------------------------------------------------------------------------------
 
-const FUNC = /function\s+([\w$]+)\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/g;
+const FUNC_HEAD = /function\s+([\w$]+)\s*\([^)]*\)\s*\{/g;
 
+/** Named functions and their bodies, found by matching braces (so one-line functions work too). */
 function parseFunctions(html: string): Map<string, string> {
   const out = new Map<string, string>();
-  for (const m of html.matchAll(FUNC)) if (!out.has(m[1])) out.set(m[1], m[2]);
+  for (const m of html.matchAll(FUNC_HEAD)) {
+    if (out.has(m[1])) continue;
+    const start = m.index! + m[0].length;
+    let depth = 0;
+    let quote = '';
+    let end = -1;
+    for (let i = start; i < html.length; i++) {
+      const c = html[i];
+      if (quote) {
+        if (c === '\\') i++;
+        else if (c === quote) quote = '';
+      } else if (c === "'" || c === '"') quote = c;
+      else if (c === '{') depth++;
+      else if (c === '}') {
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+        depth--;
+      }
+    }
+    if (end >= 0) out.set(m[1], html.slice(start, end));
+  }
   return out;
 }
 
@@ -371,6 +394,10 @@ export async function courseRules(files: FileMap, manifest: ManifestModel | null
       }
       add(t.category, title, uniq(kept.map((e) => describe(model, e))), page);
     }
+    // Set in this editor (Properties → Answer required?).
+    if (/<script id="lc-answer-rule" data-rule="required"/.test(textOf(files[page]))) {
+      add('click', 'Next stays hidden until the question is answered (set in this editor)', ['Next appears once a choice is picked or an answer typed; Back, the table of contents and auto-advance are unaffected'], page);
+    }
     // Password-like values the page compares against.
     if (model.secrets.length) {
       for (const s of uniq(model.secrets)) {
@@ -457,4 +484,22 @@ export function reportText(r: RulesReport, courseName: string): string {
     for (const d of rule.details) lines.push(`    • ${d}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * The buttons that move a page forward: clicking them goes to the page's own next page (its
+ * `trivNextPage` target), directly or behind conditions. Used to hide Next until a question is answered.
+ */
+export function nextButtons(files: FileMap, page: string): { id: string; label: string }[] {
+  if (!files[page]) return [];
+  const model = buildModel(files, page, []);
+  const out: { id: string; label: string }[] = [];
+  for (const name of model.funcs.keys()) {
+    const m = /^([\w$]+?)onUp$/.exec(name);
+    if (!m) continue;
+    const body = model.funcs.get(name) ?? '';
+    const forward = /\btrivNextPage\s*\(/.test(body) || effectsOf(model, name).some((e) => e.kind === 'jump' && model.pageLabel(e.target) === 'the next page');
+    if (forward) out.push({ id: m[1], label: model.label(m[1]) });
+  }
+  return out;
 }

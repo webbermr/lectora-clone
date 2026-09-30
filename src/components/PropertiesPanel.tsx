@@ -5,6 +5,7 @@ import { isImageFile, isMediaFile, relative, resolveFrom } from '../lib/paths';
 import { useStore } from '../lib/store';
 import { describe } from './EditStage';
 import { LivePanel } from './LivePanel';
+import { AnswerRuleSection } from './AnswerRuleSection';
 
 type El = HTMLElement;
 
@@ -301,6 +302,7 @@ function PageProps({ doc }: { doc: Document }) {
         <Field label="Browser title" wide value={doc.title} onApply={(v) => change('Change page title', () => (doc.title = v))} />
         <ColorField el={body} prop="backgroundColor" label="Background" />
       </Section>
+      <AnswerRuleSection page={s.currentPath} />
       <p className="hint">
         Click an object on the page to select it. Drag to move, use the handles to resize, double-click to edit
         text. Alt+click selects the parent. Arrow keys nudge (Shift = 10px).
@@ -318,7 +320,13 @@ export function PropertiesPanel() {
   const s = useStore();
   let body: ReactNode;
   if (s.view === 'live') body = <LivePanel />;
-  else if (s.view !== 'edit') body = <p className="hint">Switch to Edit view to change page objects.</p>;
+  else if (s.view !== 'edit')
+    body = (
+      <>
+        <AnswerRuleSection page={s.viewingPath ?? s.currentPath} />
+        <p className="hint">Switch to Edit view to change page objects.</p>
+      </>
+    );
   else if (!ed.doc || !ed.path) body = <p className="hint">Open an HTML page to see its properties.</p>;
   else if (ed.selected && ed.selected.isConnected) body = <ElementProps key={ed.getVersion()} el={ed.selected} pagePath={ed.path} />;
   else body = <PageProps key={ed.getVersion()} doc={ed.doc} />;

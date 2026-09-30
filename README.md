@@ -190,6 +190,18 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   are swapped in: the page on screen is recognised by the Lectora objects it declares (the ones
   only that page has decide it), so the highlight, Remove and the page assets panel all follow it
 
+**Answer required?** (Properties, and Live edit)
+- Question pages are detected: final-test pages from the course's test file, and module quiz or
+  knowledge-check pages by their file name (`quiz`, `question`, `knowledge_check`, `kc`…). Any other
+  page can be set by hand
+- Per page: **Course default**, **Required** or **Not required**. Required hides the page's Next
+  button until the learner answers (picks an option, types an answer, or the question's variable is
+  set). Back, the table of contents and auto-advance are left alone
+- The course default applies to every question page that hasn't been set on its own; pages without
+  a Next button are left as they are and listed. The Rules report shows which pages require an answer
+- The rule is a small script the editor adds to the page (`<script id="lc-answer-rule">`), so
+  choosing Not required or undoing removes it cleanly
+
 **Code view**
 - Edit any text file (HTML, CSS, JS, XML, JSON), including `imsmanifest.xml`
 
