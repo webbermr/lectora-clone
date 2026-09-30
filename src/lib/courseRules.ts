@@ -396,7 +396,7 @@ export async function courseRules(files: FileMap, manifest: ManifestModel | null
     }
     // Set in this editor (Properties → Answer required?).
     if (/<script id="lc-answer-rule" data-rule="required"/.test(textOf(files[page]))) {
-      add('click', 'Next stays hidden until the question is answered (set in this editor)', ['Next appears once a choice is picked or an answer typed; Back, the table of contents and auto-advance are unaffected'], page);
+      add('click', 'The question must be answered before moving on (set in this editor)', ['Next stays hidden and Submit does nothing until a choice is picked or an answer typed, and the page won\'t move on by itself; Back and the table of contents are unaffected'], page);
     }
     // Password-like values the page compares against.
     if (model.secrets.length) {
@@ -491,15 +491,24 @@ export function reportText(r: RulesReport, courseName: string): string {
  * `trivNextPage` target), directly or behind conditions. Used to hide Next until a question is answered.
  */
 export function nextButtons(files: FileMap, page: string): { id: string; label: string }[] {
-  if (!files[page]) return [];
+  return forwardNavigation(files, page).buttons;
+}
+
+/** The Next buttons plus the file names "the next page" goes to (for blocking an automatic move there). */
+export function forwardNavigation(files: FileMap, page: string): { buttons: { id: string; label: string }[]; targets: string[] } {
+  if (!files[page]) return { buttons: [], targets: [] };
   const model = buildModel(files, page, []);
-  const out: { id: string; label: string }[] = [];
+  const buttons: { id: string; label: string }[] = [];
+  const targets = new Set<string>();
+  const own = /trivExitPage\(\s*'([^']*)'/.exec(model.funcs.get('trivNextPage') ?? '')?.[1];
+  if (own) targets.add(basename(own.split('#')[0]));
   for (const name of model.funcs.keys()) {
     const m = /^([\w$]+?)onUp$/.exec(name);
     if (!m) continue;
     const body = model.funcs.get(name) ?? '';
-    const forward = /\btrivNextPage\s*\(/.test(body) || effectsOf(model, name).some((e) => e.kind === 'jump' && model.pageLabel(e.target) === 'the next page');
-    if (forward) out.push({ id: m[1], label: model.label(m[1]) });
+    const jumps = effectsOf(model, name).filter((e) => e.kind === 'jump' && model.pageLabel(e.target) === 'the next page');
+    for (const j of jumps) if (j.kind === 'jump') targets.add(basename(j.target.split('#')[0]));
+    if (/\btrivNextPage\s*\(/.test(body) || jumps.length) buttons.push({ id: m[1], label: model.label(m[1]) });
   }
-  return out;
+  return { buttons, targets: [...targets] };
 }

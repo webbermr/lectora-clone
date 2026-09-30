@@ -191,12 +191,16 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   only that page has decide it), so the highlight, Remove and the page assets panel all follow it
 
 **Answer required?** (Properties, and Live edit)
-- Question pages are detected: final-test pages from the course's test file, and module quiz or
-  knowledge-check pages by their file name (`quiz`, `question`, `knowledge_check`, `kc`…). Any other
-  page can be set by hand
-- Per page: **Course default**, **Required** or **Not required**. Required hides the page's Next
-  button until the learner answers (picks an option, types an answer, or the question's variable is
-  set). Back, the table of contents and auto-advance are left alone
+- Question pages are detected: final-test pages from the course's test file, pages with a Lectora
+  question on them (module quizzes), and pages named like quizzes (`quiz`, `question`,
+  `knowledge_check`, `kc`…). Any other page can be set by hand
+- Per page: **Course default**, **Required** or **Not required**. Required holds the learner on the
+  page until they answer (pick an option, type an answer, or the question's own answer variable gets a
+  value): Next stays hidden, and a Submit button (quiz pages that score and move on in one click) stays
+  on screen but only says "Please choose an answer first" when clicked
+- Until then the page also can't move itself on: an auto-advance to the next page (when the narration
+  ends, say) is dropped. Moves the learner asks for (Back, the table of contents) and moves elsewhere
+  (a session timeout) still happen
 - The course default applies to every question page that hasn't been set on its own; pages without
   a Next button are left as they are and listed. The Rules report shows which pages require an answer
 - The rule is a small script the editor adds to the page (`<script id="lc-answer-rule">`), so

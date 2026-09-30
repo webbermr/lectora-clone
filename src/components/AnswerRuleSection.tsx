@@ -54,6 +54,9 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
     );
   };
 
+  // Quiz pages often have Submit (it scores the answer and moves on) instead of Next.
+  const moveOn = info.next.length && info.next.every((n) => /submit/i.test(n.label)) ? 'Submit' : 'Next';
+
   return (
     <details className="section answer-rule" open={!!info.question || !!info.rule}>
       <summary>Answer required?</summary>
@@ -67,9 +70,9 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
             <>This page isn't recognised as a question page. </>
           )}
           {info.next.length ? (
-            <>Next button: {info.next.map((n) => n.label).join(', ')}.</>
+            <>Button that moves on: {info.next.map((n) => n.label).join(', ')}.</>
           ) : (
-            <span className="warn-text">No Next button found on this page.</span>
+            <span className="warn-text">No Next or Submit button found on this page.</span>
           )}
         </p>
         <label className="check-row">
@@ -77,14 +80,14 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
           <span className="muted small"> ({info.question ? (info.def === 'required' ? 'required' : 'not required') : 'applies to question pages only'})</span>
         </label>
         <label className="check-row">
-          <input type="radio" checked={choice === 'required'} disabled={!info.next.length} onChange={() => void choose('required')} /> Required: Next stays hidden until answered
+          <input type="radio" checked={choice === 'required'} disabled={!info.next.length} onChange={() => void choose('required')} /> Required: {moveOn === 'Submit' ? 'Submit does nothing' : 'Next stays hidden'} until answered
         </label>
         <label className="check-row">
           <input type="radio" checked={choice === 'optional'} onChange={() => void choose('optional')} /> Not required
         </label>
         <p className="hint">
-          Now: {effective === 'required' ? 'the learner must answer before Next appears' : "the editor doesn't add a requirement (the course's own behaviour applies)"}. Only the
-          Next button is affected; Back, the table of contents and auto-advance aren't.
+          Now: {effective === 'required' ? `the learner must answer before ${moveOn === 'Submit' ? 'Submit works' : 'Next appears'}, and the page won't move on by itself until then` : "the editor doesn't add a requirement (the course's own behaviour applies)"}.
+          Back and the table of contents aren't affected.
         </p>
         <div className="course-default">
           <span className="small">Course default for all {info.count} question page{info.count === 1 ? '' : 's'}:</span>
