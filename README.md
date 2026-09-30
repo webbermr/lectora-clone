@@ -201,6 +201,13 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Until then the page also can't move itself on: an auto-advance to the next page (when the narration
   ends, say) is dropped. Moves the learner asks for (Back, the table of contents) and moves elsewhere
   (a session timeout) still happen
+- Works with Lectora's page player, which runs each page's scripts in a hidden frame and draws it in the
+  player window: the check watches the page's own variables and button in the frame, and hides, blocks and
+  shows its note in the window the learner sees
+- The check is copied into each page when Required is chosen, so pages set before an editor update keep the
+  old copy. Properties says when pages have an older version and updates them all with one click.
+  **On screen now** shows what the check on the page being previewed is doing (running, which answer
+  variable it watches, answered or not)
 - The course default applies to every question page that hasn't been set on its own; pages without
   a Next button are left as they are and listed. The Rules report shows which pages require an answer
 - The rule is a small script the editor adds to the page (`<script id="lc-answer-rule">`), so

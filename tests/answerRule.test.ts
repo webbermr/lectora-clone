@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readScormZip } from '../src/lib/package';
-import { answerVariables, applyDefault, courseDefault, questionPages, readRule, setRule } from '../src/lib/answerRule';
+import { answerVariables, applyDefault, courseDefault, outdatedRules, questionPages, readRule, setRule } from '../src/lib/answerRule';
 import { encodeText } from '../src/lib/text';
 
 // A Lectora-style page with a Next button that goes to the page's next page (names invented).
@@ -221,5 +221,59 @@ var trivQuestionArray=[qu55];
     button7.onUp(); // answered: the original handler is back
     expect(button7.onUp).toBe(handler);
     expect(onUps).toBe(1);
+  });
+
+  it("works with Lectora's page player, where the page's scripts run in one window and it's drawn in another", () => {
+    vi.useFakeTimers();
+    const w = window as unknown as Record<string, unknown>;
+    delete w.pgID;
+    delete w.__lcAnswerGuard;
+    // The display: another window's document, as getDisplayDocument() returns under the player.
+    const frame = document.createElement('iframe');
+    document.body.appendChild(frame);
+    const shown = frame.contentDocument!;
+    shown.body.innerHTML = '<div id="button9"><svg id="button9SVG"></svg></div><div id="button7"><svg id="button7SVG"><path id="button7path"/></svg></div><input type="radio" id="r1">';
+    w.getDisplayDocument = () => shown;
+    // Next (button9) is hidden where the learner sees it…
+    run(setRule(files(), 'a001_code_quiz_question_1.html', { rule: 'required', set: 'page' })!);
+    expect(shown.getElementById('lc-answer-guard')?.textContent).toContain('#button9');
+    vi.advanceTimersByTime(300);
+    // …and a choice picked there counts as the answer.
+    (shown.getElementById('r1') as HTMLInputElement).checked = true;
+    vi.advanceTimersByTime(300);
+    expect(shown.getElementById('lc-answer-guard')).toBeNull();
+
+    // A Submit page: clicks in the display window are stopped there, and the note shows there.
+    const quiz = `<html><body><script>
+function trivNextPage() {
+    trivExitPage( 'a001_after.html', true )
+}
+function button7onUp() {
+  trivExitPage('a001_after.html',true);
+}
+button7 = new ObjButton('button7', 'SUBMIT',373,404,118,42,1,108,'div','',1,0)
+var trivQuestionArray=[qu55];
+</script></body></html>`;
+    const f = { ...files(), 'a001_scenario.html': encodeText(quiz) };
+    let submitted = 0;
+    shown.getElementById('button7')!.addEventListener('click', () => submitted++);
+    run(setRule(f, 'a001_scenario.html', { rule: 'required', set: 'page' })!);
+    vi.advanceTimersByTime(300);
+    shown.getElementById('button7path')!.dispatchEvent(new (frame.contentWindow as unknown as typeof window).MouseEvent('click', { bubbles: true }));
+    expect(submitted).toBe(0);
+    expect(shown.getElementById('lc-answer-note')?.textContent).toBe('Please choose an answer first.');
+    delete w.getDisplayDocument;
+    frame.remove();
+  });
+
+  it('spots pages whose answer check came from an older version of the editor, and rewrites them', () => {
+    const f = files();
+    const current = setRule(f, 'a001_code_quiz_question_1.html', { rule: 'required', set: 'default' })!;
+    const old = current.replace(/ data-v="\d+"/, '').replace(/(<script id="lc-answer-rule"[^>]*>)[\s\S]*?(<\/script>)/, '$1(function(){/* older check */})();$2');
+    expect(outdatedRules({ ...f, 'a001_code_quiz_question_1.html': encodeText(current) })).toEqual([]);
+    const redo = outdatedRules({ ...f, 'a001_code_quiz_question_1.html': encodeText(old) });
+    expect(redo.map((r) => r.path)).toEqual(['a001_code_quiz_question_1.html']);
+    expect(redo[0].text).toBe(current);
+    expect(readRule(redo[0].text)).toEqual({ rule: 'required', set: 'default' });
   });
 });
