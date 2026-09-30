@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { textOf } from '../lib/assetRefs';
 import { applyDefault, courseDefault, questionPages, readRule, setRule, type AnswerRule } from '../lib/answerRule';
 import { nextButtons } from '../lib/courseRules';
@@ -7,6 +7,42 @@ import { store, useStore } from '../lib/store';
 import { encodeText } from '../lib/text';
 
 type Choice = 'default' | AnswerRule;
+
+interface GuardInfo {
+  page?: string;
+  watching?: string[];
+  varFound?: boolean;
+  holding?: 'submit' | 'next';
+  state?: 'waiting' | 'answered' | 'left';
+}
+
+/** What the answer guard on the page on screen is doing (null: no guard running there), checked every second. */
+function useGuardOnScreen(active: boolean): GuardInfo | null | undefined {
+  const [info, setInfo] = useState<GuardInfo | null | undefined>(undefined);
+  useEffect(() => {
+    if (!active) return;
+    const read = () => {
+      const look = (w: Window | null, depth: number): GuardInfo | null => {
+        if (!w) return null;
+        try {
+          const g = (w as unknown as { __lcAnswerGuardInfo?: GuardInfo; pgID?: string }).__lcAnswerGuardInfo;
+          const pg = (w as unknown as { pgID?: string }).pgID;
+          if (g && (g.page === undefined || g.page === pg)) return { ...g };
+        } catch {
+          return null; // another origin
+        }
+        if (depth > 0) for (let i = 0; i < w.frames.length; i++) { const g = look(w.frames[i], depth - 1); if (g) return g; }
+        return null;
+      };
+      const frame = document.querySelector<HTMLIFrameElement>('iframe.stage-iframe');
+      setInfo(frame ? look(frame.contentWindow, 2) : undefined);
+    };
+    read();
+    const t = setInterval(read, 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return active ? info : undefined;
+}
 
 /** Properties section: must the learner answer this page's question before Next appears? */
 export function AnswerRuleSection({ page }: { page: string | null }) {
@@ -25,6 +61,7 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
       count: questionPages(files).size,
     };
   }, [files, page]);
+  const onScreen = useGuardOnScreen(!!info && (info.rule?.rule ?? (info.question ? info.def : 'optional')) === 'required');
   if (!info || !page || !files) return null;
 
   const choice: Choice = !info.rule || info.rule.set === 'default' ? 'default' : info.rule.rule;
@@ -89,6 +126,16 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
           Now: {effective === 'required' ? `the learner must answer before ${moveOn === 'Submit' ? 'Submit works' : 'Next appears'}, and the page won't move on by itself until then` : "the editor doesn't add a requirement (the course's own behaviour applies)"}.
           Back and the table of contents aren't affected.
         </p>
+        {effective === 'required' && onScreen !== undefined && (
+          <p className={`small ${onScreen && onScreen.state !== 'answered' ? '' : 'warn-text'}`}>
+            On screen now:{' '}
+            {!onScreen
+              ? 'the check isn\'t running on this page. Reload the page to start it; if it still doesn\'t run, tell us.'
+              : onScreen.state === 'answered'
+                ? `counted as answered, so ${onScreen.holding === 'submit' ? 'Submit works' : 'Next is shown'}. Reload the page to start over.`
+                : `waiting for an answer${onScreen.watching?.length ? (onScreen.varFound === false ? ` (the answer variable ${onScreen.watching.join(', ')} isn't on the page, so a picked choice counts)` : ` (watching ${onScreen.watching.join(', ')})`) : ' (a picked choice or typed answer counts)'}.`}
+          </p>
+        )}
         <div className="course-default">
           <span className="small">Course default for all {info.count} question page{info.count === 1 ? '' : 's'}:</span>
           <select value={info.def} disabled={busy || !info.count} onChange={(e) => void setDefault(e.target.value as AnswerRule)}>
