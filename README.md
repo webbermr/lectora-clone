@@ -101,6 +101,25 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - The course check runs straight after, and the whole delete is one undo step. A broken link it
   finds has a **Fix** button: pick the page it should go to and the link is repointed
 
+**Course rules** (sidebar **Rules** tab)
+- Scans every page's own scripts and lists, in plain words, what the course does by itself:
+  - **timers**: how long, what starts them, and what happens when they run out (e.g. a 10-minute timer
+    that shows an inactivity warning, then a 2-minute one that goes to the session time-out page)
+  - **when narration or video ends** (e.g. show the Next button; go on if auto-advance is chosen)
+  - **what each page checks when it opens** (e.g. go to a lockout page if a saved flag is set)
+  - **buttons with rules**: conditions, counters and lockouts (e.g. Next counts quick clicks and locks
+    out after the fourth), buttons that close the course or jump elsewhere
+  - **passwords written into the page code** (shown masked, with where they lead)
+  - **test settings**: pass mark, time limit, questions per attempt and pool, pass/fail pages
+  - **variables saved in the LMS**, with their starting values
+- It follows Lectora's triggers (`loadActions`, `…onDone`, `…onUp`, `…onSelChg`, `…actionShow`) through the
+  actions they call, including each condition's "otherwise" branch. A rule that repeats on many pages is
+  listed once with the pages it's on (click one to open it); "the next page" is read from each page's own
+  `trivNextPage`, so per-page targets still merge
+- **Copy report** puts the whole list on the clipboard as text, to paste into an email or a chat. Passwords
+  stay masked there too
+- Runs in the browser on the course you've imported; about a second for a 400-page course
+
 **Course check** (sidebar **Check** tab)
 - Broken links have a **Fix** button to repoint them at a page you choose
 - Finds links to pages that aren't in the package, Next/Back buttons that loop or point at their own
@@ -327,5 +346,6 @@ src/lib/syncRead.ts       Answers course pages' synchronous file requests (with 
 src/lib/lectoraDecl.ts    Reading Lectora object declarations (id, name, image, position)
 src/lib/moveObjects.ts    Reading and rewriting Lectora objects' declared positions
 src/lib/objectTwins.ts    The same object on other pages (same id, or a per-chapter copy)
+src/lib/courseRules.ts    Course rules report: triggers → conditions → effects, merged across pages
 src/components/       React UI (ribbon, explorer, stage, properties)
 ```
