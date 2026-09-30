@@ -129,16 +129,16 @@ function guardScript(hideIds: string[], blockIds: string[], vars: string[], targ
   var stops=['mousedown','mouseup','click','touchstart','touchend','pointerdown','pointerup','keydown'];
   // On the window, so it runs before any handler the page put on the document or the button.
   if(block.length)for(var s=0;s<stops.length;s++)window.addEventListener(stops[s],stop,true);
-  // And Lectora's own click handler for the button (button169467onUp), in case a click reaches it some other way.
-  var ups={};
+  // And Lectora's own click handler. The button object keeps its own reference to it
+  // (button169467.onUp = button169467onUp) and every way of pressing it (mouse, keys, the accessible
+  // <button>) calls that, so both the object's onUp and the global function are wrapped.
+  var ups=[];
+  function guarded(orig){var g=function(){if(!done){tell();return;}return orig.apply(this,arguments);};g.__lcGuard=true;return g;}
   function wrapUps(){
     for(var i=0;i<block.length;i++){
-      var name=block[i]+'onUp',f=window[name];
-      if(typeof f!='function'||f.__lcGuard)continue;
-      (function(name,orig){
-        var g=function(){if(!done){tell();return;}return orig.apply(this,arguments);};
-        g.__lcGuard=true;ups[name]={orig:orig,g:g};window[name]=g;
-      })(name,f);
+      var obj=window[block[i]],name=block[i]+'onUp',f=window[name];
+      if(obj&&typeof obj.onUp=='function'&&!obj.onUp.__lcGuard){var o=obj.onUp,g=guarded(o);obj.onUp=g;ups.push({owner:obj,key:'onUp',orig:o,g:g});}
+      if(typeof f=='function'&&!f.__lcGuard){var h=guarded(f);window[name]=h;ups.push({owner:window,key:name,orig:f,g:h});}
     }
   }
   // Inputs are compared with how they were when first seen, so pre-set choices (a default radio in an
@@ -184,7 +184,7 @@ function guardScript(hideIds: string[], blockIds: string[], vars: string[], targ
     done=true;clearInterval(timer);if(st.parentNode)st.parentNode.removeChild(st);
     for(var k=0;k<kinds.length;k++)doc.removeEventListener(kinds[k],gesture,true);
     for(k=0;k<stops.length;k++)window.removeEventListener(stops[k],stop,true);
-    for(var n in ups)if(window[n]===ups[n].g)window[n]=ups[n].orig;
+    for(var u=0;u<ups.length;u++)if(ups[u].owner[ups[u].key]===ups[u].g)ups[u].owner[ups[u].key]=ups[u].orig;
     if(real&&window.trivExitPage===wrapper)window.trivExitPage=real;
   }
   // A page player swaps pages in one window: the last page's guard stands down before this one starts.
