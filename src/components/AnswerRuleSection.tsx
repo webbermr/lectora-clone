@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { textOf } from '../lib/assetRefs';
-import { applyDefault, courseDefault, questionPages, readRule, setRule, type AnswerRule } from '../lib/answerRule';
+import { applyDefault, courseDefault, outdatedRules, questionPages, readRule, setRule, type AnswerRule } from '../lib/answerRule';
 import { nextButtons } from '../lib/courseRules';
 import { isHtmlFile } from '../lib/paths';
 import { store, useStore } from '../lib/store';
@@ -59,6 +59,7 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
       rule: readRule(html),
       def: courseDefault(files),
       count: questionPages(files).size,
+      outdated: outdatedRules(files),
     };
   }, [files, page]);
   const onScreen = useGuardOnScreen(!!info && (info.rule?.rule ?? (info.question ? info.def : 'optional')) === 'required');
@@ -77,6 +78,14 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
     }
     await store.write(c === 'required' ? 'Require an answer on this page' : c === 'optional' ? "Don't require an answer on this page" : 'Use the course default for answers', [{ path: page, bytes: encodeText(next) }]);
     store.setStatus(`${c === 'default' ? 'This page follows the course default' : c === 'required' ? 'An answer is required on this page' : 'An answer is not required on this page'}. Reload the page to see it.`);
+  };
+
+  const refresh = async () => {
+    setBusy(true);
+    const n = info.outdated.length;
+    await store.write('Update the answer check', info.outdated.map((c) => ({ path: c.path, bytes: encodeText(c.text) })));
+    setBusy(false);
+    store.setStatus(`Updated the answer check on ${n} page${n === 1 ? '' : 's'}. Reload the page to use it.`);
   };
 
   const setDefault = async (rule: AnswerRule) => {
@@ -126,6 +135,17 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
           Now: {effective === 'required' ? `the learner must answer before ${moveOn === 'Submit' ? 'Submit works' : 'Next appears'}, and the page won't move on by itself until then` : "the editor doesn't add a requirement (the course's own behaviour applies)"}.
           Back and the table of contents aren't affected.
         </p>
+        {info.outdated.length > 0 && (
+          <div className="stack">
+            <p className="small warn-text">
+              {info.outdated.some((c) => c.path === page) ? 'This page has' : `${info.outdated.length} page${info.outdated.length === 1 ? ' has' : 's have'}`} an older version of the answer
+              check, from before the editor was updated.
+            </p>
+            <button disabled={busy} onClick={() => void refresh()}>
+              Update the check on {info.outdated.length} page{info.outdated.length === 1 ? '' : 's'}
+            </button>
+          </div>
+        )}
         {effective === 'required' && onScreen !== undefined && (
           <p className={`small ${onScreen && onScreen.state !== 'answered' ? '' : 'warn-text'}`}>
             On screen now:{' '}
