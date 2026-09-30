@@ -173,6 +173,25 @@ var trivQuestionArray=[qu55];
     expect(questionPages(f).get('a001_communications_scenario.html')).toMatchObject({ source: 'content', vars: ['VarQUIZ_A1'] });
     const out = setRule(f, 'a001_communications_scenario.html', { rule: 'required', set: 'page' })!;
     expect(out).toContain('var vars=["VarQUIZ_A1"], targets=["a001_after.html"]');
-    expect(out).toContain('#button7');
+    expect(out).not.toContain('#button7'); // Submit isn't hidden…
+
+    // …but does nothing until answered.
+    vi.useFakeTimers();
+    const w = window as unknown as { pgID?: string; __lcAnswerGuard?: unknown; VarQUIZ_A1: { v: string; getValue: () => string } };
+    delete w.pgID;
+    delete w.__lcAnswerGuard;
+    w.VarQUIZ_A1 = { v: '', getValue: () => w.VarQUIZ_A1.v };
+    document.body.innerHTML = '<div id="button7"><svg id="button7SVG"><path id="button7path"/></svg></div>';
+    let submitted = 0;
+    document.getElementById('button7')!.addEventListener('click', () => submitted++);
+    run(out);
+    vi.advanceTimersByTime(300);
+    document.getElementById('button7path')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(submitted).toBe(0);
+    expect(document.getElementById('lc-answer-note')?.textContent).toBe('Please choose an answer first.');
+    w.VarQUIZ_A1.v = 'Sender';
+    vi.advanceTimersByTime(300);
+    document.getElementById('button7path')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(submitted).toBe(1);
   });
 });

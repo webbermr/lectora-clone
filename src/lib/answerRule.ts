@@ -1,5 +1,6 @@
 /**
- * "Answer required" for question pages: the page's Next button stays hidden until the question is answered.
+ * "Answer required" for question pages: the page's Next button stays hidden until the question is answered
+ * (a Submit button, which scores the answer and moves on, stays visible but does nothing until then).
  *
  * Lectora keeps each question's answer in a variable (the test file names it, e.g. VarTMAL1_M1_P3) and treats
  * it as unanswered while that is empty or "~~~null~~~". The editor adds a small script to the page that hides
@@ -97,13 +98,35 @@ export function readRule(html: string): PageRule | null {
 }
 
 /** The script that keeps Next hidden until answered. ES5, so it runs in any LMS browser. */
-function guardScript(nextIds: string[], vars: string[], targets: string[]): string {
-  const hide = nextIds.flatMap((id) => partIds(id)).map((id) => `#${id}`).join(',');
+function guardScript(hideIds: string[], blockIds: string[], vars: string[], targets: string[]): string {
+  const hide = hideIds.flatMap((id) => partIds(id)).map((id) => `#${id}`).join(',');
+  const block = blockIds.flatMap((id) => partIds(id));
   return `(function(){
-  var vars=${JSON.stringify(vars)}, targets=${JSON.stringify(targets)}, doc=document, page=window.pgID, done=false;
+  var vars=${JSON.stringify(vars)}, targets=${JSON.stringify(targets)}, block=${JSON.stringify(block)}, doc=document, page=window.pgID, done=false;
   if(doc.getElementById('lc-answer-guard'))doc.getElementById('lc-answer-guard').parentNode.removeChild(doc.getElementById('lc-answer-guard'));
-  var st=doc.createElement('style');st.id='lc-answer-guard';st.appendChild(doc.createTextNode(${JSON.stringify(`${hide}{visibility:hidden!important}`)}));
+  var st=doc.createElement('style');st.id='lc-answer-guard';st.appendChild(doc.createTextNode(${JSON.stringify(hide ? `${hide}{visibility:hidden!important}` : '')}));
   (doc.head||doc.documentElement).appendChild(st);
+  // Submit stays on screen (it's how the learner answers), but does nothing until there is an answer.
+  var told=0;
+  function tell(){
+    var now=new Date().getTime();if(now-told<600)return;told=now;
+    var n=doc.getElementById('lc-answer-note');if(n)n.parentNode.removeChild(n);
+    n=doc.createElement('div');n.id='lc-answer-note';n.setAttribute('role','alert');
+    n.style.cssText='position:fixed;left:50%;top:40%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 18px;border-radius:6px;font:16px sans-serif;z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+    n.appendChild(doc.createTextNode('Please choose an answer first.'));
+    (doc.body||doc.documentElement).appendChild(n);
+    setTimeout(function(){if(n.parentNode)n.parentNode.removeChild(n);},2500);
+  }
+  function blocked(t){for(;t&&t!==doc;t=t.parentNode)if(t.id&&block.indexOf(t.id)>=0)return true;return false;}
+  function stop(e){
+    if(done||!blocked(e.target))return;
+    if(e.type=='keydown'&&e.key!=='Enter'&&e.key!==' ')return;
+    if(e.stopImmediatePropagation)e.stopImmediatePropagation();else e.stopPropagation();
+    if(e.preventDefault)e.preventDefault();
+    if(e.type=='click'||e.type=='touchend'||e.type=='keydown')tell();
+  }
+  var stops=['mousedown','mouseup','click','touchstart','touchend','pointerdown','pointerup','keydown'];
+  if(block.length)for(var s=0;s<stops.length;s++)doc.addEventListener(stops[s],stop,true);
   // Inputs are compared with how they were when first seen, so pre-set choices (a default radio in an
   // options popup) don't count, and custom-drawn choices (hidden inputs) still do when picked.
   function state(e){var t=(e.type||'').toLowerCase();return t=='radio'||t=='checkbox'?(e.checked?'1':'0'):e.tagName=='SELECT'?String(e.selectedIndex):String(e.value||'');}
@@ -141,6 +164,7 @@ function guardScript(nextIds: string[], vars: string[], targets: string[]): stri
     if(done)return;
     done=true;clearInterval(timer);if(st.parentNode)st.parentNode.removeChild(st);
     for(var k=0;k<kinds.length;k++)doc.removeEventListener(kinds[k],gesture,true);
+    for(k=0;k<stops.length;k++)doc.removeEventListener(stops[k],stop,true);
     if(real&&window.trivExitPage===wrapper)window.trivExitPage=real;
   }
   // A page player swaps pages in one window: the last page's guard stands down before this one starts.
@@ -167,7 +191,9 @@ export function setRule(files: FileMap, page: string, rule: PageRule | null): st
   if (rule.rule === 'required') {
     const forward = forwardNavigation(files, page);
     if (!forward.buttons.length) return null;
-    script = guardScript(forward.buttons.map((b) => b.id), [...new Set([...(questionPages(files).get(page)?.vars ?? []), ...answerVariables(html)])], forward.targets);
+    // Submit (scores the answer and moves on) stays visible but inactive; Next is hidden.
+    const submit = (b: { label: string }) => /submit/i.test(b.label);
+    script = guardScript(forward.buttons.filter((b) => !submit(b)).map((b) => b.id), forward.buttons.filter(submit).map((b) => b.id), [...new Set([...(questionPages(files).get(page)?.vars ?? []), ...answerVariables(html)])], forward.targets);
   }
   const block = `<script id="lc-answer-rule" data-rule="${rule.rule}" data-set="${rule.set}">${script}</script>\n`;
   const end = /<\/body\s*>/i.exec(without);

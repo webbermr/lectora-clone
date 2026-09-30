@@ -396,7 +396,7 @@ export async function courseRules(files: FileMap, manifest: ManifestModel | null
     }
     // Set in this editor (Properties → Answer required?).
     if (/<script id="lc-answer-rule" data-rule="required"/.test(textOf(files[page]))) {
-      add('click', 'Next stays hidden until the question is answered (set in this editor)', ['Next appears once a choice is picked or an answer typed; Back, the table of contents and auto-advance are unaffected'], page);
+      add('click', 'The question must be answered before moving on (set in this editor)', ['Next stays hidden and Submit does nothing until a choice is picked or an answer typed, and the page won\'t move on by itself; Back and the table of contents are unaffected'], page);
     }
     // Password-like values the page compares against.
     if (model.secrets.length) {

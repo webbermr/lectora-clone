@@ -80,13 +80,13 @@ export function AnswerRuleSection({ page }: { page: string | null }) {
           <span className="muted small"> ({info.question ? (info.def === 'required' ? 'required' : 'not required') : 'applies to question pages only'})</span>
         </label>
         <label className="check-row">
-          <input type="radio" checked={choice === 'required'} disabled={!info.next.length} onChange={() => void choose('required')} /> Required: {moveOn} stays hidden until answered
+          <input type="radio" checked={choice === 'required'} disabled={!info.next.length} onChange={() => void choose('required')} /> Required: {moveOn === 'Submit' ? 'Submit does nothing' : 'Next stays hidden'} until answered
         </label>
         <label className="check-row">
           <input type="radio" checked={choice === 'optional'} onChange={() => void choose('optional')} /> Not required
         </label>
         <p className="hint">
-          Now: {effective === 'required' ? `the learner must answer before ${moveOn} appears, and the page won't move on by itself until then` : "the editor doesn't add a requirement (the course's own behaviour applies)"}.
+          Now: {effective === 'required' ? `the learner must answer before ${moveOn === 'Submit' ? 'Submit works' : 'Next appears'}, and the page won't move on by itself until then` : "the editor doesn't add a requirement (the course's own behaviour applies)"}.
           Back and the table of contents aren't affected.
         </p>
         <div className="course-default">
