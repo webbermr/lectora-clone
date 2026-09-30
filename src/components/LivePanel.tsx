@@ -8,6 +8,7 @@ import { vfsUrl } from '../lib/vfs';
 import { textOf } from '../lib/assetRefs';
 import { declaredObjects, hiddenIds, navigatesAway, objectIdOf, objectRoot, partIds } from '../lib/removeObjects';
 import { sameObjectEverywhere } from '../lib/objectTwins';
+import { AnswerRuleSection } from './AnswerRuleSection';
 
 /** Properties for the element selected in Live edit. */
 export function LivePanel() {
@@ -365,6 +366,7 @@ function PageAssets() {
         <button title="Scan the page again" onClick={() => rescan((n) => n + 1)}>⟳</button>
       </div>
       <RemovedObjects page={pagePath} />
+      <AnswerRuleSection page={pagePath} />
       {assets.length === 0 && <p className="hint">No images, video or audio found on this page yet.</p>}
       {(filter === 'all' ? kinds : [filter]).map((k) => {
         const group = shown.filter((a) => a.kind === k);

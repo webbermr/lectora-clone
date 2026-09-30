@@ -330,3 +330,8 @@ kbd { font: 11px/1 ui-monospace, monospace; padding: 1px 4px; border: 1px solid 
 .rule-pages li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.link { background: none; border: none; padding: 0; color: var(--accent, #2f7de1); cursor: pointer; font: inherit; text-align: left; }
 button.link:hover { text-decoration: underline; }
+
+/* Answer required? (Properties) */
+.answer-rule .check-row { display: block; font-size: 12px; line-height: 1.5; }
+.answer-rule .check-row input { margin: 0 6px 0 0; vertical-align: -2px; }
+.answer-rule .course-default { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 6px; }
