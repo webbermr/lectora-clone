@@ -132,10 +132,14 @@ function guardScript(hideIds: string[], blockIds: string[], vars: string[], targ
   function state(e){var t=(e.type||'').toLowerCase();return t=='radio'||t=='checkbox'?(e.checked?'1':'0'):e.tagName=='SELECT'?String(e.selectedIndex):String(e.value||'');}
   var bases={};
   function answered(){
-    for(var i=0;i<vars.length;i++){var v=window[vars[i]];if(v&&v.getValue){var x=String(v.getValue());if(x&&x!='~~~null~~~')return true;}}
+    // The question's own answer variable is the truth when there is one: other inputs on the page (the
+    // advance-mode radios Lectora ticks once the page loads, a password the browser fills in) aren't answers.
+    var known=false;
+    for(var i=0;i<vars.length;i++){var v=window[vars[i]];if(v&&v.getValue){known=true;var x=String(v.getValue());if(x&&x!='~~~null~~~')return true;}}
+    if(known)return false;
     var els=doc.querySelectorAll('input,textarea,select');
     for(i=0;i<els.length;i++){
-      var e=els[i],t=(e.type||'').toLowerCase();if(t=='hidden'||t=='button'||t=='submit'||t=='image'||t=='reset')continue;
+      var e=els[i],t=(e.type||'').toLowerCase();if(t=='hidden'||t=='button'||t=='submit'||t=='image'||t=='reset'||t=='password')continue;
       // Kept by id where there is one, so a choice Lectora redraws is still compared with how it started.
       var now=state(e),key=e.id?'#'+e.id:null,base=key?bases[key]:e.getAttribute('data-lc-base');
       if(base===undefined||base===null){if(key)bases[key]=now;else e.setAttribute('data-lc-base',now);continue;}

@@ -189,6 +189,14 @@ var trivQuestionArray=[qu55];
     document.getElementById('button7path')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(submitted).toBe(0);
     expect(document.getElementById('lc-answer-note')?.textContent).toBe('Please choose an answer first.');
+    // Lectora ticks the default advance-mode radio once the page has loaded: that isn't an answer.
+    document.body.insertAdjacentHTML('beforeend', '<input type="radio" id="radio9id" name="advancing_change"><input type="password" id="entry1id">');
+    vi.advanceTimersByTime(300);
+    (document.getElementById('radio9id') as HTMLInputElement).checked = true;
+    (document.getElementById('entry1id') as HTMLInputElement).value = 'autofilled';
+    vi.advanceTimersByTime(300);
+    document.getElementById('button7path')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(submitted).toBe(0);
     w.VarQUIZ_A1.v = 'Sender';
     vi.advanceTimersByTime(300);
     document.getElementById('button7path')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
