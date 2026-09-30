@@ -12,5 +12,5 @@
 
 {$SITE_ADDRESS:localhost}, {$SITE_NAME:localhost} {
 	encode gzip
-	reverse_proxy lectora-clone:8080
+	reverse_proxy scorm-editor:8080
 }

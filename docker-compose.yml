@@ -1,7 +1,10 @@
+# Containers, image and volumes are all named scorm-editor, whatever the folder is called.
+name: scorm-editor
+
 services:
-  lectora-clone:
+  scorm-editor:
     build: .
-    image: lectora-clone:latest
+    image: scorm-editor:latest
     # Plain HTTP, for this computer only (browsers allow it on localhost).
     # Other computers use the HTTPS service below.
     ports:
@@ -15,11 +18,13 @@ services:
 
   # HTTPS for other people on your network:
   #   SITE_ADDRESS=192.168.1.50 docker compose --profile https up -d
+  # (or put SITE_ADDRESS=… and COMPOSE_PROFILES=https in a .env file next to this one,
+  # so updates keep them)
   https:
     image: caddy:2-alpine
     profiles: ["https"]
     depends_on:
-      - lectora-clone
+      - scorm-editor
     ports:
       - "443:443"
       - "80:80"
