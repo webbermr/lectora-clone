@@ -77,7 +77,7 @@ button.big { padding: 10px 18px; font-size: 15px; }
 .sidebar { border-right: 1px solid var(--line); }
 .props { border-left: 1px solid var(--line); }
 .tabs { display: flex; border-bottom: 1px solid var(--line); background: var(--panel-2); }
-.tabs button { border: 0; border-radius: 0; background: transparent; padding: 8px 12px; border-bottom: 2px solid transparent; }
+.tabs button { border: 0; border-radius: 0; background: transparent; padding: 8px 9px; border-bottom: 2px solid transparent; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
 .tabs button.active { border-bottom-color: var(--accent); background: transparent; font-weight: 600; }
 .panel-body { flex: 1; overflow: auto; padding: 8px; }
 
@@ -315,3 +315,18 @@ kbd { font: 11px/1 ui-monospace, monospace; padding: 1px 4px; border: 1px solid 
 .position-object .xy input { width: 72px; }
 .position-object .check-row { display: block; font-size: 12px; line-height: 1.4; }
 .position-object .check-row input { margin: 0 6px 0 0; vertical-align: -2px; }
+
+/* Rules tab */
+.rules-group .count { font-weight: normal; color: var(--muted); margin-left: 4px; }
+.rules-list { list-style: none; margin: 0; padding: 0 4px 6px; display: flex; flex-direction: column; gap: 8px; }
+.rule { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--panel); }
+.rule.warn { border-color: #e3b4ab; background: #fbeeeb; }
+.rule-title { font-weight: 600; font-size: 12.5px; }
+.rule-details { margin: 4px 0 0; padding-left: 16px; font-size: 12px; }
+.rule-details li { margin: 2px 0; }
+.rule-pages { font-size: 12px; margin-top: 4px; }
+.rule-pages summary { cursor: pointer; color: var(--muted); }
+.rule-pages ul { list-style: none; margin: 2px 0 0; padding-left: 8px; max-height: 180px; overflow: auto; }
+.rule-pages li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.link { background: none; border: none; padding: 0; color: var(--accent, #2f7de1); cursor: pointer; font: inherit; text-align: left; }
+button.link:hover { text-decoration: underline; }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as actions from '../lib/actions';
 import { CourseCheckPanel } from './CourseCheckPanel';
+import { RulesPanel } from './RulesPanel';
 import { FindReplace } from './FindReplace';
 import { isTypingTarget } from './LiveStage';
 import { deleteFlow } from '../lib/deleteFlow';
@@ -12,7 +13,7 @@ import { buildFileIndex, inferLectoraStructure, isLectoraPackage, pageCount, typ
 import { vfsUrl } from '../lib/vfs';
 
 export function Sidebar() {
-  const [tab, setTab] = useState<'title' | 'files' | 'find' | 'check'>('title');
+  const [tab, setTab] = useState<'title' | 'files' | 'find' | 'check' | 'rules'>('title');
   return (
     <aside className="sidebar">
       <div className="tabs">
@@ -20,8 +21,9 @@ export function Sidebar() {
         <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}>Files</button>
         <button className={tab === 'find' ? 'active' : ''} onClick={() => setTab('find')}>Find</button>
         <button className={tab === 'check' ? 'active' : ''} onClick={() => setTab('check')} title="Check the course for broken links, loops and tracking problems">Check</button>
+        <button className={tab === 'rules' ? 'active' : ''} onClick={() => setTab('rules')} title="What the course does by itself: timers, lockouts, advance rules, test settings">Rules</button>
       </div>
-      {tab === 'title' ? <TitleExplorer /> : tab === 'files' ? <FileList /> : tab === 'find' ? <FindReplace /> : <CourseCheckPanel />}
+      {tab === 'title' ? <TitleExplorer /> : tab === 'files' ? <FileList /> : tab === 'find' ? <FindReplace /> : tab === 'check' ? <CourseCheckPanel /> : <RulesPanel />}
     </aside>
   );
 }
