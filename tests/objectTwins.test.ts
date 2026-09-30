@@ -33,3 +33,30 @@ describe('the same object on other pages', () => {
     expect(sameObjectEverywhere(files, 'a001_technology_welcome.html', 'shape1').map((r) => r.page)).toEqual(['a001_technology_goals.html', 'a001_technology_welcome.html']);
   });
 });
+
+// Image objects give their file before their name: ('id', 'images/id.png', 'Name', x, y, w, h, …)
+const imgShape = (id: string, x = 832) => `${id} = new ObjImage('${id}','images/${id}.png','Rectangle 2',${x},0,178.000000,58.000000,1,71,'div','',0 )
+${id}.addIe8Attr(${x}, 0, 178, 58, 0, 0)`;
+const png = (seed: number) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, seed, seed + 1, seed + 2]);
+
+describe('the same image or shape on other pages', () => {
+  const imageFiles = {
+    'a001_technology_welcome.html': encodeText(`<script>\n${imgShape('shape66593')}\n</script>`),
+    'a001_technology_goals.html': encodeText(`<script>\n${imgShape('shape66593')}\n</script>`),
+    // Another chapter's own copy: its own id and file, the same picture.
+    'a001_industry_welcome.html': encodeText(`<script>\n${imgShape('shape70001')}\n</script>`),
+    // Same spot and name, different picture.
+    'a001_other.html': encodeText(`<script>\n${imgShape('shape70002')}\n</script>`),
+    'images/shape66593.png': png(1),
+    'images/shape70001.png': png(1),
+    'images/shape70002.png': png(9),
+  };
+
+  it('finds copies by id and by identical picture, not by a shared name', () => {
+    expect(sameObjectEverywhere(imageFiles, 'a001_technology_welcome.html', 'shape66593')).toEqual([
+      { page: 'a001_industry_welcome.html', id: 'shape70001' },
+      { page: 'a001_technology_goals.html', id: 'shape66593' },
+      { page: 'a001_technology_welcome.html', id: 'shape66593' },
+    ]);
+  });
+});

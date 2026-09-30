@@ -10,6 +10,7 @@
 import type { FileMap } from './package';
 import { isHtmlFile } from './paths';
 import { textOf } from './assetRefs';
+import { declarations } from './lectoraDecl';
 
 export const REMOVED_STYLE_ID = 'lc-removed';
 const BLOCK = new RegExp(`<style id="${REMOVED_STYLE_ID}">([\\s\\S]*?)</style>\\n?`);
@@ -54,9 +55,12 @@ export interface PageObject {
 /** Objects a Lectora page creates from script, by id. */
 export function declaredObjects(html: string): Map<string, PageObject> {
   const out = new Map<string, PageObject>();
-  for (const m of html.matchAll(/\bnew\s+(Obj\w+)\(\s*'([\w-]+)'\s*(?:,\s*'((?:[^'\\]|\\.)*)')?/g)) {
-    if (!out.has(m[2])) out.set(m[2], { id: m[2], kind: m[1], name: (m[3] ?? '').replace(/\\(.)/g, '$1') });
+  // Every object, even one declared without a position…
+  for (const m of html.matchAll(/\bnew\s+(Obj\w+)\(\s*'([\w-]+)'/g)) {
+    if (!out.has(m[2])) out.set(m[2], { id: m[2], kind: m[1], name: '' });
   }
+  // …named as Lectora names it (for images that's the argument after the file).
+  for (const [id, d] of declarations(html)) out.set(id, { id, kind: d.kind, name: d.name });
   return out;
 }
 

@@ -5,19 +5,28 @@
  * per chapter is a separate object in each chapter: the copyright line is `text236596` on one
  * chapter's pages and `text236384` on another's. So an object counts as the same one elsewhere when
  * it has the same id, or when it is the same kind and size, at the same spot, showing the same
- * content (its text, else its name or image). Objects with no content to compare only match by id,
- * so plain shapes are never lumped together.
+ * content: its text, else its picture (compared by its bytes), else its name. Objects with no
+ * content to compare only match by id, so plain unnamed shapes are never lumped together.
  */
 import { textOf } from './assetRefs';
 import type { FileMap } from './package';
-import { isHtmlFile } from './paths';
+import { isHtmlFile, resolveFrom } from './paths';
+import { declarations } from './lectoraDecl';
 
 export interface ObjectRef {
   page: string;
   id: string;
 }
 
-const DECL = /\bnew\s+(Obj\w+)\(\s*'([\w-]+)'\s*,\s*(null|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/g;
+interface ObjectInfo {
+  kind: string;
+  /** "x,y,w,h" as declared. */
+  box: string;
+  text: string;
+  name: string;
+  image: string;
+}
+
 const IMAGE = /["']([^"'\s]+\.(?:png|jpe?g|gif|svg|webp))["']/i;
 
 /** Visible words of an object's `addInnerText('…')` markup. */
@@ -33,15 +42,16 @@ function visibleWords(inner: string): string {
     .trim();
 }
 
-/** Each object's signature on a page (null when it has no content to compare by). */
-const sigCache = new WeakMap<Uint8Array, Map<string, string | null>>();
-export function objectSignatures(bytes: Uint8Array): Map<string, string | null> {
-  let out = sigCache.get(bytes);
+/** What each object on a page is, read once per version of the page. */
+const infoCache = new WeakMap<Uint8Array, Map<string, ObjectInfo>>();
+export function objectInfos(bytes: Uint8Array): Map<string, ObjectInfo> {
+  let out = infoCache.get(bytes);
   if (out) return out;
   out = new Map();
   const html = textOf(bytes);
-  if (html.includes('new Obj')) {
-    // One pass each: every object's inner markup, and its setup lines (for the image it shows).
+  const decls = declarations(html);
+  if (decls.size) {
+    // One pass each: every object's inner markup, and the first image its setup lines name.
     const inner = new Map<string, string>();
     for (const m of html.matchAll(/\b([\w-]+)\.addInnerText\(\s*'((?:[^'\\]|\\.)*)'/g)) if (!inner.has(m[1])) inner.set(m[1], m[2]);
     const images = new Map<string, string>();
@@ -50,34 +60,64 @@ export function objectSignatures(bytes: Uint8Array): Map<string, string | null> 
       const img = IMAGE.exec(m[0])?.[1];
       if (img) images.set(m[1], img);
     }
-    for (const m of html.matchAll(DECL)) {
-      const [, kind, id, rawName, x, y, w, h] = m;
-      if (out.has(id)) continue;
-      const text = inner.has(id) ? visibleWords(inner.get(id)!) : '';
-      const name = rawName === 'null' ? '' : rawName.slice(1, -1);
-      const image = images.get(id) ?? '';
-      const content = text ? `text:${text}` : image ? `image:${image}` : name ? `name:${name}` : '';
-      out.set(id, content ? `${kind}|${Number(x)},${Number(y)},${Number(w)},${Number(h)}|${content}` : null);
+    for (const [id, d] of decls) {
+      out.set(id, {
+        kind: d.kind,
+        box: `${d.x},${d.y},${d.w},${d.h}`,
+        text: inner.has(id) ? visibleWords(inner.get(id)!) : '',
+        name: d.name,
+        image: d.image || images.get(id) || '',
+      });
     }
   }
-  sigCache.set(bytes, out);
+  infoCache.set(bytes, out);
   return out;
+}
+
+/** A short fingerprint of a file's bytes (FNV-1a), cached per version of the file. */
+const hashCache = new WeakMap<Uint8Array, string>();
+function fingerprint(bytes: Uint8Array): string {
+  let h = hashCache.get(bytes);
+  if (h) return h;
+  let x = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) x = Math.imul(x ^ bytes[i], 0x01000193);
+  h = `${bytes.length}:${(x >>> 0).toString(36)}`;
+  hashCache.set(bytes, h);
+  return h;
+}
+
+/**
+ * What an object shows, to compare copies by: its text; else its picture (Lectora renders each
+ * shape to a file named after the object, so copies have different files with the same pixels);
+ * else its name. Null when there's nothing to compare, so plain unnamed shapes only match by id.
+ */
+function content(info: ObjectInfo, page: string, files: FileMap): string | null {
+  if (info.text) return `text:${info.text}`;
+  if (info.image) {
+    const path = resolveFrom(page, info.image);
+    const bytes = path ? files[path] : undefined;
+    if (bytes) return `image:${fingerprint(bytes)}`;
+  }
+  return info.name ? `name:${info.name}` : null;
 }
 
 /** The object itself plus the same object on every other page (see above), page order. */
 export function sameObjectEverywhere(files: FileMap, page: string, id: string): ObjectRef[] {
-  const here = files[page] ? objectSignatures(files[page]).get(id) : undefined;
+  const hereInfo = files[page] ? objectInfos(files[page]).get(id) : undefined;
+  const hereContent = hereInfo ? content(hereInfo, page, files) : null;
   const out: ObjectRef[] = [];
   for (const p of Object.keys(files).sort()) {
     if (!isHtmlFile(p)) continue;
-    const sigs = objectSignatures(files[p]);
-    if (sigs.has(id)) {
+    const infos = objectInfos(files[p]);
+    if (infos.has(id)) {
       out.push({ page: p, id });
       continue;
     }
-    if (!here) continue;
-    for (const [other, sig] of sigs) {
-      if (sig === here) {
+    if (!hereInfo || !hereContent) continue;
+    for (const [other, info] of infos) {
+      // Cheap checks first; content (which may read an image) only for the same kind at the same spot.
+      if (info.kind !== hereInfo.kind || info.box !== hereInfo.box) continue;
+      if (content(info, p, files) === hereContent) {
         out.push({ page: p, id: other });
         break;
       }
@@ -95,7 +135,7 @@ export function warmSignatures(files: FileMap): () => void {
     const until = performance.now() + 8;
     while (pending.length && performance.now() < until) {
       const p = pending.pop()!;
-      if (files[p]) objectSignatures(files[p]);
+      if (files[p]) objectInfos(files[p]);
     }
     if (pending.length) timer = setTimeout(step, 16);
   };
