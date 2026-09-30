@@ -203,7 +203,7 @@ function PositionObject({ el }: { el: Element }) {
   const set = (axis: 'x' | 'y', value: string) => {
     const n = Math.round(Number(value));
     if (!Number.isFinite(n) || n === o.at[axis]) return;
-    void live.moveObject(o.doc, o.id, { ...o.at, [axis]: n });
+    void live.moveTo(o.doc, o.id, o.at, { ...o.at, [axis]: n });
   };
   return (
     <details className="section position-object" open>

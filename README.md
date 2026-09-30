@@ -133,8 +133,9 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   with a rule in the page's own `<style id="lc-removed">` block rather than cut out of the code,
   because the page's scripts still show, hide and animate them by id. With nothing selected, the
   panel lists what's been removed on the page, with Restore buttons
-- **Move** objects: drag the selected object, nudge it with the arrow keys (Shift: 10px), or type an
-  exact X/Y in the Position panel. Lectora's page declares each object's position
+- **Move** objects: drag the selected object, nudge it with the arrow keys (Shift: 10px; hold to keep
+  going), or type an exact X/Y in the Position panel. It moves on screen straight away and is saved
+  when you stop (on drop, or a moment after the last key), so a burst of nudges is one undo step. Lectora's page declares each object's position
   (`new ObjText('text63337', null, 320, 9, …)` and `addIe8Attr(320, 9, …)`); those numbers are
   rewritten, so the course places the object there itself. An object repeated on many pages moves on
   all of them by default (or on this page only). "The same object" means the same id, or, since
