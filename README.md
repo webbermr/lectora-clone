@@ -158,6 +158,11 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Prev/Next through the organization, live completion/score readout, SCORM call log, reset
 - Audio and video can be scrubbed: the preview server answers the byte-range requests players
   use to seek
+- Files a course loads with a synchronous request (Lectora's player reads its encrypted test,
+  `_tobj….txt`, this way when it starts) are answered from the open project too. Browsers don't pass
+  those through the service worker, so without this the course asked the web server and showed
+  "You must run this content from a web-based server". The small helper that does it
+  (`public/vfs-sync.js`) is added to pages only in the editor's view, never to the files you publish
 - As you click through the course (in Preview or Live edit), the Title Explorer and Files tab
   highlight the page on screen and scroll to it. Switching views carries on from that page
 - Works with Lectora's page player too, where the address stays on `a001index.html` while pages
@@ -316,6 +321,7 @@ src/lib/live.ts       Live edit session (text write-back, asset replacement)
 src/lib/frameFollow.ts  Follows the page a Live edit / Preview frame has navigated to
 src/lib/removeObjects.ts  Hiding page objects by id (Live edit Remove / Restore)
 src/lib/pageIdentity.ts   Which page a running document shows (address, or Lectora objects)
+src/lib/syncRead.ts       Answers course pages' synchronous file requests (with public/vfs-sync.js)
 src/lib/moveObjects.ts    Reading and rewriting Lectora objects' declared positions
 src/lib/objectTwins.ts    The same object on other pages (same id, or a per-chapter copy)
 src/components/       React UI (ribbon, explorer, stage, properties)

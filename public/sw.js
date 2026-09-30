@@ -23,6 +23,7 @@ self.addEventListener('fetch', (event) => {
           }
         }
       }
+      if (hit && isPageLoad(event.request)) return withSyncHelper(hit);
       if (hit) return withRange(hit, event.request.headers.get('Range'));
       return new Response('Not found in project: ' + decodeURIComponent(url.pathname), {
         status: 404,
@@ -59,4 +60,46 @@ async function withRange(response, range) {
     status: 206,
     headers: { ...base, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': String(end - start + 1) },
   });
+}
+
+// A course page (or frame) being opened, as opposed to a file it loads.
+function isPageLoad(request) {
+  return request.mode === 'navigate' || ['document', 'iframe', 'frame'].includes(request.destination);
+}
+
+// Put the editor's helper for synchronous requests (vfs-sync.js) at the top of an HTML
+// page, so it runs before the course's scripts. Works on the bytes, so the page's own
+// encoding is left alone; only the editor's view of the page changes, never the file.
+async function withSyncHelper(response) {
+  const type = response.headers.get('Content-Type') || '';
+  if (!/html/i.test(type)) return response;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const tag = new TextEncoder().encode(`<script src="${self.registration.scope}vfs-sync.js"></script>`);
+  const headers = { 'Content-Type': type, 'Cache-Control': 'no-store' };
+  // UTF-16 pages would need the tag in UTF-16 too; leave them as they are.
+  if ((bytes[0] === 0xfe && bytes[1] === 0xff) || (bytes[0] === 0xff && bytes[1] === 0xfe)) return new Response(bytes, { headers });
+  const at = afterTag(bytes, 'head') ?? afterTag(bytes, 'html') ?? 0;
+  const out = new Uint8Array(bytes.length + tag.length);
+  out.set(bytes.subarray(0, at), 0);
+  out.set(tag, at);
+  out.set(bytes.subarray(at), at + tag.length);
+  return new Response(out, { headers });
+}
+
+/** Index just past the opening <name …> tag (ASCII, any case), or null. */
+function afterTag(bytes, name) {
+  const lower = name.toLowerCase();
+  const limit = Math.min(bytes.length, 65536);
+  outer: for (let i = 0; i + name.length + 1 < limit; i++) {
+    if (bytes[i] !== 0x3c) continue; // <
+    for (let j = 0; j < name.length; j++) {
+      const c = bytes[i + 1 + j] | 0x20; // lower-case ASCII
+      if (c !== lower.charCodeAt(j)) continue outer;
+    }
+    const next = bytes[i + 1 + name.length];
+    if (next !== 0x3e && next !== 0x20 && next !== 0x09 && next !== 0x0a && next !== 0x0d) continue; // <header> isn't <head>
+    for (let k = i + 1 + name.length; k < limit; k++) if (bytes[k] === 0x3e) return k + 1;
+    return null;
+  }
+  return null;
 }
