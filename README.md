@@ -197,7 +197,8 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - Per page: **Course default**, **Required** or **Not required**. Required holds the learner on the
   page until they answer (pick an option, type an answer, or the question's own answer variable gets a
   value): Next stays hidden, and a Submit button (quiz pages that score and move on in one click) stays
-  on screen but only says "Please choose an answer first" when clicked
+  on screen but only shows Lectora's own message box, "You must answer all of the questions to continue.",
+  when clicked
 - Until then the page also can't move itself on: an auto-advance to the next page (when the narration
   ends, say) is dropped. Moves the learner asks for (Back, the table of contents) and moves elsewhere
   (a session timeout) still happen

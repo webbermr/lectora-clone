@@ -196,7 +196,7 @@ var trivQuestionArray=[qu55];
     vi.advanceTimersByTime(300);
     document.getElementById('button7path')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(submitted).toBe(0);
-    expect(document.getElementById('lc-answer-note')?.textContent).toBe('Please choose an answer first.');
+    expect(document.getElementById('lc-answer-note')?.textContent).toBe('You must answer all of the questions to continue.');
     // Lectora ticks the default advance-mode radio once the page has loaded: that isn't an answer.
     document.body.insertAdjacentHTML('beforeend', '<input type="radio" id="radio9id" name="advancing_change"><input type="password" id="entry1id">');
     vi.advanceTimersByTime(300);
@@ -261,7 +261,7 @@ var trivQuestionArray=[qu55];
     vi.advanceTimersByTime(300);
     shown.getElementById('button7path')!.dispatchEvent(new (frame.contentWindow as unknown as typeof window).MouseEvent('click', { bubbles: true }));
     expect(submitted).toBe(0);
-    expect(shown.getElementById('lc-answer-note')?.textContent).toBe('Please choose an answer first.');
+    expect(shown.getElementById('lc-answer-note')?.textContent).toBe('You must answer all of the questions to continue.');
     delete w.getDisplayDocument;
     frame.remove();
   });
@@ -275,5 +275,37 @@ var trivQuestionArray=[qu55];
     expect(redo.map((r) => r.path)).toEqual(['a001_code_quiz_question_1.html']);
     expect(redo[0].text).toBe(current);
     expect(readRule(redo[0].text)).toEqual({ rule: 'required', set: 'default' });
+  });
+
+  it("tells the learner with Lectora's own message box, titled like the course's other messages", () => {
+    vi.useFakeTimers();
+    const w = window as unknown as Record<string, unknown>;
+    delete w.pgID;
+    delete w.__lcAnswerGuard;
+    const quiz = `<html><body><script>
+function trivNextPage() {
+    trivExitPage( 'a001_after.html', true )
+}
+function action1(fn){
+    if(!document.getElementById("DLG_Div_1"))trivAlert( 'action1', 'TMA', 'You are right!', fn );
+}
+function button7onUp() {
+  trivExitPage('a001_after.html',true);
+}
+button7 = new ObjButton('button7', 'SUBMIT',373,404,118,42,1,108,'div','',1,0)
+var trivQuestionArray=[qu55];
+</script></body></html>`;
+    const f = { ...files(), 'a001_scenario.html': encodeText(quiz) };
+    const alerts: unknown[][] = [];
+    w.trivAlert = (...a: unknown[]) => alerts.push(a);
+    const button7 = { onUp: () => {} };
+    w.button7 = button7;
+    document.body.innerHTML = '<div id="button7"></div>';
+    run(setRule(f, 'a001_scenario.html', { rule: 'required', set: 'page' })!);
+    button7.onUp();
+    expect(alerts).toEqual([['lcAnswerRequired', 'TMA', 'You must answer all of the questions to continue.']]);
+    expect(document.getElementById('lc-answer-note')).toBeNull();
+    delete w.trivAlert;
+    delete w.button7;
   });
 });

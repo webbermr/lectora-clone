@@ -98,7 +98,10 @@ export function readRule(html: string): PageRule | null {
 }
 
 /** Bumped whenever the guard script changes, so pages carrying an older copy can be spotted and refreshed. */
-export const GUARD_VERSION = 5;
+export const GUARD_VERSION = 6;
+
+/** What the learner is told, in Lectora's own words for a required question. */
+export const ANSWER_MESSAGE = 'You must answer all of the questions to continue.';
 
 /**
  * The script that holds the learner on a question page until it's answered. ES5, so it runs in any LMS browser.
@@ -108,10 +111,11 @@ export const GUARD_VERSION = 5;
  * live in this script's window, while the elements the learner sees and clicks live in the display document.
  * Without the player the two are the same.
  */
-function guardScript(hideIds: string[], blockIds: string[], vars: string[], targets: string[]): string {
+function guardScript(hideIds: string[], blockIds: string[], vars: string[], targets: string[], title: string): string {
   const hide = hideIds.flatMap((id) => partIds(id)).map((id) => `#${id}`).join(',');
   return `(function(){
   var vars=${JSON.stringify(vars)}, targets=${JSON.stringify(targets)}, block=${JSON.stringify(blockIds)}, css=${JSON.stringify(hide ? `${hide}{visibility:hidden!important}` : '')};
+  var title=${JSON.stringify(title)}, message=${JSON.stringify(ANSWER_MESSAGE)};
   var page=window.pgID, done=false, timer=null;
   function display(){try{if(typeof getDisplayDocument=='function'){var d=getDisplayDocument();if(d&&d.getElementById)return d;}}catch(e){}return document;}
   function docs(){var d=display();return d===document?[document]:[d,document];}
@@ -127,10 +131,16 @@ function guardScript(hideIds: string[], blockIds: string[], vars: string[], targ
   var told=0;
   function tell(){
     var now=new Date().getTime();if(now-told<600)return;told=now;
-    var d=display(),n=d.getElementById('lc-answer-note');if(n)n.parentNode.removeChild(n);
+    var d=display();
+    // Lectora's own message box (the one its required questions use), shown in the player window.
+    if(typeof window.trivAlert=='function'){
+      if(d.getElementById('DLG_Div_lcAnswerRequired'))return;
+      try{window.trivAlert('lcAnswerRequired',title,message);return;}catch(e){}
+    }
+    var n=d.getElementById('lc-answer-note');if(n)n.parentNode.removeChild(n);
     n=d.createElement('div');n.id='lc-answer-note';n.setAttribute('role','alert');
     n.style.cssText='position:fixed;left:50%;top:40%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 18px;border-radius:6px;font:16px sans-serif;z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.4)';
-    n.appendChild(d.createTextNode('Please choose an answer first.'));
+    n.appendChild(d.createTextNode(message));
     (d.body||d.documentElement).appendChild(n);
     setTimeout(function(){if(n.parentNode)n.parentNode.removeChild(n);},2500);
   }
@@ -244,6 +254,22 @@ function guardScript(hideIds: string[], blockIds: string[], vars: string[], targ
 }
 
 /**
+ * The title Lectora puts on its message boxes (`trivAlert( 'id', 'TMA', '…' )`): from this page's own
+ * messages if it has any, else another page's, else the page title.
+ */
+const TITLE = /\btrivAlert\(\s*'[^']*'\s*,\s*'((?:[^'\\]|\\.)*)'/;
+function alertTitle(files: FileMap, page: string): string {
+  const own = TITLE.exec(textOf(files[page]))?.[1];
+  if (own) return own;
+  for (const p of Object.keys(files)) {
+    if (!isHtmlFile(p)) continue;
+    const t = TITLE.exec(textOf(files[p]))?.[1];
+    if (t) return t;
+  }
+  return /<title>([^<]*)<\/title>/i.exec(textOf(files[page]))?.[1]?.trim() ?? '';
+}
+
+/**
  * The page with this rule (or none). Needs the page's Next buttons for "required"; returns null when there
  * are none to hide, so the caller can say so.
  */
@@ -257,7 +283,7 @@ export function setRule(files: FileMap, page: string, rule: PageRule | null): st
     if (!forward.buttons.length) return null;
     // Submit (scores the answer and moves on) stays visible but inactive; Next is hidden.
     const submit = (b: { label: string }) => /submit/i.test(b.label);
-    script = guardScript(forward.buttons.filter((b) => !submit(b)).map((b) => b.id), forward.buttons.filter(submit).map((b) => b.id), [...new Set([...(questionPages(files).get(page)?.vars ?? []), ...answerVariables(html)])], forward.targets);
+    script = guardScript(forward.buttons.filter((b) => !submit(b)).map((b) => b.id), forward.buttons.filter(submit).map((b) => b.id), [...new Set([...(questionPages(files).get(page)?.vars ?? []), ...answerVariables(html)])], forward.targets, alertTitle(files, page));
   }
   const block = `<script id="lc-answer-rule" data-rule="${rule.rule}" data-set="${rule.set}"${rule.rule === 'required' ? ` data-v="${GUARD_VERSION}"` : ''}>${script}</script>\n`;
   const end = /<\/body\s*>/i.exec(without);
