@@ -185,9 +185,13 @@ var trivQuestionArray=[qu55];
     let submitted = 0;
     document.getElementById('button7')!.addEventListener('click', () => submitted++);
     let onUps = 0;
-    (window as unknown as Record<string, unknown>).button7onUp = () => onUps++;
+    const handler = () => onUps++;
+    // Lectora keeps its own reference on the button object (button7.onUp = button7onUp) and calls that.
+    const button7 = { onUp: handler as () => void };
+    Object.assign(window, { button7onUp: handler, button7 });
     run(out);
-    (window as unknown as { button7onUp: () => void }).button7onUp(); // however Lectora calls it
+    (window as unknown as { button7onUp: () => void }).button7onUp();
+    button7.onUp();
     expect(onUps).toBe(0);
     vi.advanceTimersByTime(300);
     document.getElementById('button7path')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -214,7 +218,8 @@ var trivQuestionArray=[qu55];
     document.getElementById('button7path')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(submitted).toBe(1);
     expect((ww.__lcAnswerGuardInfo as { state: string }).state).toBe('answered');
-    (window as unknown as { button7onUp: () => void }).button7onUp();
+    button7.onUp(); // answered: the original handler is back
+    expect(button7.onUp).toBe(handler);
     expect(onUps).toBe(1);
   });
 });
