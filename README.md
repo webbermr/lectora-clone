@@ -141,6 +141,11 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   of a different format, shape or transparency asks first. It includes files the page's script only names
   (audio played by an action, a popup not yet open), marks what's on screen, and lets you
   **Show** or **Replace** each one. Lectora's transparent spacer GIFs are left out
+- Nothing on the page starts by itself: narration and video wait until you press play, and the page
+  doesn't move on by itself (narration ending, auto-advance, timers, the session timeout); the status
+  bar says when something was held back. Your own clicks work as usual, so in Interact mode Next and
+  menus take you on. **Preview** plays the course exactly as learners see it, including the course's
+  own choice of advancing automatically or by clicking Next
 - **Interact** mode lets you click through a single-page player to the screen you want.
   Press **S** for Select & edit and **I** for Interact (ignored while typing in a text box)
 - **Remove** callouts, buttons, images and other objects: select one and press 🗑 Remove in the
@@ -221,6 +226,7 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   and page summary. It suggests text changes as before/after cards, and offers to **remove**, **restore**
   or **move** objects and set **Answer required?**, doing exactly what the editor's own controls do.
   Nothing changes until you click **Apply**, and each applied change is one undoable step (Ctrl+Z / ⌘Z)
+- After a change is applied, Live edit or Preview reloads the page you were on so you see it
 - When the object is on other pages too (an inherited footer or button, or a chapter's own copy), the card
   lists them and offers **all N pages** or **This page only**. Removing a button that moves the learner on
   comes with a warning

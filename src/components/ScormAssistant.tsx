@@ -9,6 +9,11 @@ import { endpoint, loadConnection, saveMode, saveOwnKey, type Connection } from 
 import { planAction } from '../lib/scorm/actions';
 import { applyProposal, proposalProblem, type Proposal } from '../lib/scorm/tools';
 
+/** Show SCORM's change on the page in Live edit or Preview (where the page runs and wouldn't pick it up itself). */
+function reloadAfterChange() {
+  if (store.view === 'live' || store.view === 'preview') store.reloadStage();
+}
+
 const VIEW_NAMES: Record<string, string> = { edit: 'Edit', live: 'Live edit', preview: 'Preview', code: 'Code' };
 
 /** Short Markdown (paragraphs, lists, **bold**, `code`) as React elements; no HTML from the model is ever inserted. */
@@ -85,6 +90,7 @@ function ProposalCard({ item, chat }: { item: Extract<ChatItem, { kind: 'proposa
     const changes = [p, ...targets].map((c) => ({ path: c.path, bytes: encodeText(applyProposal(files, c)) }));
     await store.write(`SCORM: ${p.summary}${targets.length ? ` (${changes.length} pages)` : ''}`, changes);
     const where = targets.length ? `${changes.length} pages` : p.path;
+    reloadAfterChange();
     store.setStatus(`Applied SCORM's change to ${where}${skipped ? `; ${skipped} page${skipped === 1 ? '' : 's'} had changed and ${skipped === 1 ? 'was' : 'were'} left alone` : ''}. Undo with Ctrl+Z (⌘Z).`);
     chat.settle(p.id, 'applied', targets.length ? `on ${changes.length} pages: this one and every other page with the same object${skipped ? `, except ${skipped} that had changed` : ''}` : others.length ? 'on this page only, not the other pages with the same object' : undefined);
   };
@@ -154,6 +160,7 @@ function ActionCard({ item, chat }: { item: Extract<ChatItem, { kind: 'action' }
     if (plan.changes.length) await store.write(`SCORM: ${p.summary}`, plan.changes.map((c) => ({ path: c.path, bytes: encodeText(c.text) })));
     const pages = plan.changes.filter((c) => c.path !== 'imsmanifest.xml').length;
     const skipped = plan.skipped.length ? `; ${plan.skipped.length} page${plan.skipped.length === 1 ? '' : 's'} had changed and ${plan.skipped.length === 1 ? 'was' : 'were'} left alone` : '';
+    reloadAfterChange();
     store.setStatus(`SCORM: ${p.summary}${pages > 1 ? ` (${pages} pages)` : ''}${skipped}. Undo with Ctrl+Z (⌘Z).`);
     chat.settle(p.id, 'applied', everywhere && others.length ? `on ${pages} pages${skipped}` : others.length ? 'on this page only, not the other pages with the same object' : pages > 1 ? `on ${pages} pages` : undefined);
   };
