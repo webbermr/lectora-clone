@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ScormChat } from '../src/lib/scorm/agent';
-import { applyProposal, pageOverview, proposalProblem, runTool, TOOLS } from '../src/lib/scorm/tools';
+import { applyProposal, objectAt, pageOverview, proposalProblem, runTool, sameChangeElsewhere, TOOLS } from '../src/lib/scorm/tools';
 import { encodeText } from '../src/lib/text';
 
 // A Lectora-style page (names invented).
@@ -89,6 +89,48 @@ function sse(message: { content: unknown[]; stop_reason: string }): string {
   events.push(['message_stop', { type: 'message_stop' }]);
   return events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join('');
 }
+
+describe('a change to an object that is on other pages too', () => {
+  // The copyright line: inherited by two pages (same id), copied into another chapter (another id), and on one
+  // more page with different wording.
+  const withCopyright = (id: string, text: string) =>
+    encodeText(`<html><body><script>
+button9 = new ObjButton('button9', 'Next',954,629,30,30,1,1,'div','',1,0)
+${id} = new ObjText('${id}',null,203,41,395,15,1,71,null,'div',null,0 )
+${id}.addInnerText('<p><span class="${id}Font1">${text}</span></p>')
+</script></body></html>`);
+  const course = () => ({
+    'a001_intro_one.html': withCopyright('text236596', 'Copyright © 2016 The Example Association. All rights reserved.'),
+    'a001_intro_two.html': withCopyright('text236596', 'Copyright © 2016 The Example Association. All rights reserved.'),
+    'a001_reporting_one.html': withCopyright('text236384', 'Copyright © 2016 The Example Association. All rights reserved.'),
+    'a001_old_page.html': withCopyright('text236000', 'Copyright © 2014 Someone Else.'),
+  });
+
+  it("finds the object's other pages, including a chapter's copy under another id", () => {
+    const files = course();
+    const html = new TextDecoder().decode(files['a001_intro_one.html']);
+    expect(objectAt(html, html.indexOf('2016'))).toBe('text236596');
+    const r = sameChangeElsewhere(files, 'a001_intro_one.html', 'text236596Font1">Copyright © 2016', 'text236596Font1">Copyright © 2025');
+    expect(r.object).toEqual({ id: 'text236596', name: '' });
+    expect(r.elsewhere).toEqual([
+      { path: 'a001_intro_two.html', find: 'text236596Font1">Copyright © 2016', replace: 'text236596Font1">Copyright © 2025' },
+      { path: 'a001_reporting_one.html', find: 'text236384Font1">Copyright © 2016', replace: 'text236384Font1">Copyright © 2025' },
+    ]);
+    for (const c of r.elsewhere!) expect(applyProposal(files, c)).toContain('Copyright © 2025 The Example Association');
+  });
+
+  it('offers the other pages with the proposal, and tells SCORM so', async () => {
+    const out = await runTool('propose_edit', { path: 'a001_intro_one.html', find: 'Copyright © 2016', replace: 'Copyright © 2025', summary: 'Update the copyright year' }, { files: course(), manifest: null, courseName: 'C' });
+    expect(out.proposal!.elsewhere!.map((e) => e.path)).toEqual(['a001_intro_two.html', 'a001_reporting_one.html']);
+    expect(out.content).toContain('also on 2 other pages');
+  });
+
+  it('leaves out text that is not in a named object unless it is long enough to be the same thing', () => {
+    const files = { 'a.html': encodeText('<html><body><p>Hello there</p></body></html>'), 'b.html': encodeText('<html><body><p>Hello there</p></body></html>') };
+    expect(sameChangeElsewhere(files, 'a.html', 'Hello', 'Hi')).toEqual({});
+    expect(sameChangeElsewhere(files, 'a.html', '<p>Hello there</p>', '<p>Hi there</p>').elsewhere!.map((e) => e.path)).toEqual(['b.html']);
+  });
+});
 
 describe("SCORM's conversation", () => {
   afterEach(() => vi.unstubAllGlobals());
