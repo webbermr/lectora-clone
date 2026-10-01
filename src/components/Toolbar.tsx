@@ -31,7 +31,7 @@ export function Toolbar({ width, setWidth }: { width: string; setWidth: (w: stri
     <header className="ribbon">
       <div className="ribbon-group">
         <button onClick={() => void store.saveNow().then(() => store.close())} title="Back to the project list">☰ Projects</button>
-        <button className="primary" disabled={job?.status === 'running'} onClick={() => void actions.exportPackage()} title="Download as a SCORM .zip for your LMS">⤓ Publish SCORM</button>
+        <button className="primary" disabled={job?.status === 'running'} onClick={() => void actions.publishPackage()} title="Download as a SCORM .zip for your LMS">⤓ Publish SCORM</button>
       </div>
       <div className="ribbon-group">
         <button onClick={() => void store.undo()} disabled={!s.undoStack.length} title={s.undoStack.length ? `Undo ${s.undoStack.at(-1)!.label} (Ctrl+Z)` : 'Undo'}>↶</button>

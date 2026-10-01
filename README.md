@@ -241,6 +241,12 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 
 **Publish**
 - Downloads a SCORM `.zip` with the manifest first. Files you didn't touch are byte-identical.
+- First checks for files nothing in the course uses (pages no longer linked, pictures only they showed,
+  leftovers) and offers to **leave them out** of the download, grouped into pages, images, audio/video
+  and other files, each with its size; untick any to keep, or **include everything**. A file counts as
+  used when anything the course launches mentions it, directly or through other used files, so it errs
+  towards keeping. The course player's runtime and test files are always kept, the manifest's file
+  lists are trimmed to match, and the project itself keeps every file
 - Images, audio, video, PDFs and fonts are stored as-is (they're already compressed); only text
   files are deflated. On a 240 MB course-sized package this cut export from ~18s to ~3s with
   the same zip size
