@@ -10,7 +10,7 @@ import { courseRules, forwardNavigation, reportText } from '../courseRules';
 import { declarations } from '../lectoraDecl';
 import { openTests } from '../lectoraTest';
 import type { ManifestModel } from '../manifest';
-import { objectInfos } from '../objectTwins';
+import { objectInfos, sameObjectEverywhere } from '../objectTwins';
 import type { FileMap } from '../package';
 import { isHtmlFile, isTextFile } from '../paths';
 import { hiddenIds } from '../removeObjects';
@@ -29,6 +29,13 @@ export interface Proposal {
   find: string;
   replace: string;
   summary: string;
+  /**
+   * The same change on other pages that have the same object (an inherited object, or a chapter's own copy
+   * under another id), for the person to apply on this page only or everywhere.
+   */
+  elsewhere?: { path: string; find: string; replace: string }[];
+  /** The object the change is in, when it could be told. */
+  object?: { id: string; name: string };
 }
 
 export type ToolOutcome = { content: string; isError?: boolean; proposal?: Proposal; label: string };
@@ -85,7 +92,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: 'propose_edit',
     description:
-      'Propose a change to a text file: replace `find` (copied exactly from the current file, and occurring exactly once in it) with `replace`. Nothing changes until the person reviews it and clicks Apply; they can undo it afterwards. Keep each proposal small and focused; make several for several changes.',
+      'Propose a change to a text file: replace `find` (copied exactly from the current file, and occurring exactly once in it) with `replace`. Nothing changes until the person reviews it and clicks Apply; they can undo it afterwards. Keep each proposal small and focused; make several for several changes. When the change is in a Lectora object that also appears on other pages (an inherited object such as a copyright line or a button, or a chapter\'s own copy of it), the editor finds those pages itself and lets the person apply it on this page only or on all of them: propose it once, on the page being discussed.',
     input_schema: {
       type: 'object',
       properties: {
@@ -120,11 +127,47 @@ export function proposalProblem(files: FileMap, p: Pick<Proposal, 'path' | 'find
   return null;
 }
 
-/** The file's text with the proposal applied. Assumes proposalProblem() returned null. */
-export function applyProposal(files: FileMap, p: Proposal): string {
+/** The file's text with the change applied. Assumes proposalProblem() returned null. */
+export function applyProposal(files: FileMap, p: Pick<Proposal, 'path' | 'find' | 'replace'>): string {
   const text = textOf(files[p.path]);
   const at = text.indexOf(p.find);
   return text.slice(0, at) + p.replace + text.slice(at + p.find.length);
+}
+
+/** The Lectora object whose script line holds the text at `index` (`text5.addInnerText(…)`, `text5 = new ObjText(…)`). */
+export function objectAt(html: string, index: number): string | null {
+  const start = html.lastIndexOf('\n', index) + 1;
+  const end = html.indexOf('\n', index);
+  const line = html.slice(start, end < 0 ? undefined : end);
+  const id = /^\s*([A-Za-z_$][\w$]*)\s*(?:=\s*new\s+Obj\w+\s*\(|\.\w+\s*\()/.exec(line)?.[1];
+  return id && declarations(html).has(id) ? id : null;
+}
+
+/**
+ * Where else the same change applies: pages that have the same object as the one the change is in, where
+ * the text to replace (with that page's id for the object, when its copy has another) occurs exactly once.
+ */
+export function sameChangeElsewhere(files: FileMap, path: string, find: string, replace: string): Pick<Proposal, 'elsewhere' | 'object'> {
+  const html = textOf(files[path]);
+  const id = objectAt(html, html.indexOf(find));
+  if (!id) {
+    // Not in an object the editor can name: pages with exactly the same text (long enough not to be a fragment).
+    if (find.trim().length < 15) return {};
+    const elsewhere = Object.keys(files)
+      .sort()
+      .filter((p) => p !== path && isHtmlFile(p) && !proposalProblem(files, { path: p, find, replace }))
+      .map((p) => ({ path: p, find, replace }));
+    return elsewhere.length ? { elsewhere } : {};
+  }
+  const object = { id, name: declarations(html).get(id)?.name ?? '' };
+  const swap = (s: string, other: string) => (other === id ? s : s.split(id).join(other));
+  const elsewhere: NonNullable<Proposal['elsewhere']> = [];
+  for (const ref of sameObjectEverywhere(files, path, id)) {
+    if (ref.page === path) continue;
+    const change = { path: ref.page, find: swap(find, ref.id), replace: swap(replace, ref.id) };
+    if (!proposalProblem(files, change)) elsewhere.push(change);
+  }
+  return { elsewhere, object };
 }
 
 let proposalCount = 0;
@@ -208,9 +251,12 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       }
       const problem = proposalProblem(files, { path, find, replace });
       if (problem) return fail(problem, `Proposed a change to ${path}`);
-      const proposal: Proposal = { id: `p${++proposalCount}`, path, find, replace, summary };
+      const proposal: Proposal = { id: `p${++proposalCount}`, path, find, replace, summary, ...sameChangeElsewhere(files, path, find, replace) };
+      const more = proposal.elsewhere?.length
+        ? ` The changed text is in ${proposal.object ? proposal.object.id : 'text that'}, which is also on ${proposal.elsewhere.length} other page${proposal.elsewhere.length === 1 ? '' : 's'} (${proposal.elsewhere.slice(0, 10).map((e) => e.path).join(', ')}${proposal.elsewhere.length > 10 ? ', …' : ''}); the person is offered this page only or all of them, so don't propose those pages separately.`
+        : '';
       return {
-        content: `Proposal ${proposal.id} is shown to the person for review. It is not applied yet; you will be told if they apply or dismiss it.`,
+        content: `Proposal ${proposal.id} is shown to the person for review. It is not applied yet; you will be told if they apply or dismiss it.${more}`,
         proposal,
         label: `Proposed a change to ${path}`,
       };

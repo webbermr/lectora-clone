@@ -69,7 +69,8 @@ function editorContext(): EditorContext {
 
 function ProposalCard({ item, chat }: { item: Extract<ChatItem, { kind: 'proposal' }>; chat: ScormChat }) {
   const p: Proposal = item.proposal;
-  const apply = async () => {
+  const others = p.elsewhere ?? [];
+  const apply = async (everywhere: boolean) => {
     const files = store.project?.files;
     if (!files) return;
     const problem = proposalProblem(files, p);
@@ -77,10 +78,16 @@ function ProposalCard({ item, chat }: { item: Extract<ChatItem, { kind: 'proposa
       chat.settle(p.id, 'failed', problem);
       return;
     }
-    await store.write(`SCORM: ${p.summary}`, [{ path: p.path, bytes: encodeText(applyProposal(files, p)) }]);
-    store.setStatus(`Applied SCORM's change to ${p.path}. Undo with Ctrl+Z (⌘Z).`);
-    chat.settle(p.id, 'applied');
+    // Pages that changed since SCORM looked are left alone and listed.
+    const targets = everywhere ? others.filter((o) => !proposalProblem(files, o)) : [];
+    const skipped = everywhere ? others.length - targets.length : 0;
+    const changes = [p, ...targets].map((c) => ({ path: c.path, bytes: encodeText(applyProposal(files, c)) }));
+    await store.write(`SCORM: ${p.summary}${targets.length ? ` (${changes.length} pages)` : ''}`, changes);
+    const where = targets.length ? `${changes.length} pages` : p.path;
+    store.setStatus(`Applied SCORM's change to ${where}${skipped ? `; ${skipped} page${skipped === 1 ? '' : 's'} had changed and ${skipped === 1 ? 'was' : 'were'} left alone` : ''}. Undo with Ctrl+Z (⌘Z).`);
+    chat.settle(p.id, 'applied', targets.length ? `on ${changes.length} pages: this one and every other page with the same object${skipped ? `, except ${skipped} that had changed` : ''}` : others.length ? 'on this page only, not the other pages with the same object' : undefined);
   };
+  const thing = p.object ? `This ${p.object.name ? `object ("${p.object.name}")` : 'object'}` : 'The same text';
   return (
     <div className={`scorm-proposal scorm-${item.state}`}>
       <div className="scorm-proposal-head">
@@ -91,16 +98,37 @@ function ProposalCard({ item, chat }: { item: Extract<ChatItem, { kind: 'proposa
         <span className="del">{p.find}</span>
         <span className="ins">{p.replace}</span>
       </pre>
+      {others.length > 0 && item.state === 'pending' && (
+        <details className="small">
+          <summary>
+            {thing} is also on {others.length} other page{others.length === 1 ? '' : 's'}
+          </summary>
+          <ul className="scorm-pages">
+            {others.map((o) => (
+              <li key={o.path}>{o.path}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       {item.state === 'pending' ? (
         <div className="row">
-          <button className="primary" onClick={() => void apply()}>
-            Apply
-          </button>
+          {others.length > 0 ? (
+            <>
+              <button className="primary" onClick={() => void apply(true)}>
+                Apply to all {others.length + 1} pages
+              </button>
+              <button onClick={() => void apply(false)}>This page only</button>
+            </>
+          ) : (
+            <button className="primary" onClick={() => void apply(false)}>
+              Apply
+            </button>
+          )}
           <button onClick={() => chat.settle(p.id, 'dismissed')}>Dismiss</button>
         </div>
       ) : (
         <p className="small muted">
-          {item.state === 'applied' ? 'Applied (undo with Ctrl+Z / ⌘Z).' : item.state === 'dismissed' ? 'Dismissed.' : `Couldn't apply: ${item.note}`}
+          {item.state === 'applied' ? `Applied${item.note ? ` ${item.note}` : ''} (undo with Ctrl+Z / ⌘Z).` : item.state === 'dismissed' ? 'Dismissed.' : `Couldn't apply: ${item.note}`}
         </p>
       )}
     </div>

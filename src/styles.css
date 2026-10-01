@@ -368,3 +368,4 @@ button.link:hover { text-decoration: underline; }
 .scorm-foot textarea { flex: 1; resize: none; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .scorm-setup input[type='password'] { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .scorm-panel .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.scorm-pages { margin: 4px 0 0; padding-left: 18px; max-height: 140px; overflow-y: auto; }

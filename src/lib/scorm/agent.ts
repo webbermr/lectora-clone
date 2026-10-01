@@ -28,7 +28,7 @@ How Lectora pages work
 - Each page is an HTML file. Objects are created in script: \`button66713 = new ObjButton('button66713', 'Red Stamp_next', x, y, w, h, …)\`, likewise ObjText, ObjImage (the image file comes before the name), ObjInline (inputs, question choices), ObjMedia, ObjProgress (type 1 is a timer; its duration in ms is an argument).
 - Behaviour lives in functions: \`button66713onUp\` runs on click, \`…onDone\` when media or a timer ends, \`…onSelChg\` when a choice changes, \`…actionShow\` when shown. They call \`actionNNN(fn)\` functions that test variables (\`VarX.equals('1')\`, \`.greaterThan('3')\`) and act: \`trivExitPage('page.html')\` goes to a page, \`trivNextPage()\` / \`trivPrevPage()\` to the next or previous page, \`obj.actionShow()\` / \`actionHide()\`, \`VarX.set(...)\` / \`.add(...)\`.
 - Variables: \`new Variable('VarName', default, …, 'scorm', …)\` are saved in the LMS. Question answers live in variables set by \`Update_quNNN\`; \`trivQuestionArray\` lists a page's questions.
-- Many objects are inherited: the same id appears on every page of a chapter or the whole course, so a change on one page may need the same change on others. Use search_files to find them, and say how many pages are affected.
+- Many objects are inherited: the same id appears on every page of a chapter or the whole course, and some chapters have their own copy under another id. When you propose a change in such an object, the editor finds the other pages itself and asks the person whether to change this page only or all of them; the propose_edit result tells you how many pages that is. Mention it in your answer.
 - Pages may run inside a page player (a001index.html with ?jmptopg=), where each page's scripts run in a hidden frame and draw in the player window.
 - Test settings come from an encrypted test file; course_rules reads them for you.
 
@@ -95,7 +95,7 @@ export class ScormChat {
     if (item && item.kind === 'proposal') {
       item.state = state;
       item.note = note;
-      this.notes.push(`Proposal ${id} (${item.proposal.summary}): ${state === 'applied' ? 'applied by the person' : state === 'dismissed' ? 'dismissed by the person' : `could not be applied: ${note}`}.`);
+      this.notes.push(`Proposal ${id} (${item.proposal.summary}): ${state === 'applied' ? `applied by the person${note ? ` (${note})` : ''}` : state === 'dismissed' ? 'dismissed by the person' : `could not be applied: ${note}`}.`);
     }
     this.emit();
   }
