@@ -214,6 +214,17 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - The rule is a small script the editor adds to the page (`<script id="lc-answer-rule">`), so
   choosing Not required or undoing removes it cleanly
 
+**Ask SCORM** (the ✦ button, bottom right)
+- An AI assistant (Claude, from Anthropic) that knows which page is on screen and, in Live edit, which
+  object is selected. Ask why a page misbehaves, what the course's rules are, or for a change
+- It can list, search and read any file in the package, and use the editor's course check, Rules report
+  and page summary. It suggests changes as before/after cards; nothing changes until you click
+  **Apply**, and each applied change is one undoable step (Ctrl+Z / ⌘Z)
+- Your questions and the files SCORM reads are sent to Anthropic. Text inside course files is treated
+  as data, never as instructions, and passwords found in course code aren't repeated
+- Needs an Anthropic API key: either the server's (see [Ask SCORM's API key](#ask-scorms-api-key)) or
+  your own, entered in SCORM's settings (⚙) and kept only in your browser
+
 **Code view**
 - Edit any text file (HTML, CSS, JS, XML, JSON), including `imsmanifest.xml`
 
@@ -261,6 +272,21 @@ docker build -t scorm-editor . && docker run -d --name scorm-editor -p 127.0.0.1
 
 Then open http://localhost:8080 on the same computer. `docker build --build-arg RUN_TESTS=true …` also
 runs the unit tests during the build. Port 8080 only listens on this computer; for anyone else, see below.
+
+### Ask SCORM's API key
+
+Put an Anthropic API key in a `.env` file next to `docker-compose.yml`, then restart:
+
+```bash
+echo 'ANTHROPIC_API_KEY=sk-ant-…' >> .env
+docker compose up -d
+```
+
+The container passes SCORM's requests on to Anthropic and adds the key itself, so it never reaches
+anyone's browser; only `POST /v1/messages` is passed on. Everyone who can open the editor can use
+SCORM on that key (and its bill). Without a server key, each person can enter their own key in
+SCORM's settings instead. With `npm run dev` or `npm run preview`, set `ANTHROPIC_API_KEY` in the
+environment for the same server key.
 
 ### Let other people on your network use it
 

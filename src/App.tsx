@@ -13,6 +13,7 @@ import { Toolbar } from './components/Toolbar';
 import { Welcome } from './components/Welcome';
 import { useStore } from './lib/store';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ScormAssistant } from './components/ScormAssistant';
 
 export function App() {
   const s = useStore();
@@ -74,6 +75,9 @@ export function App() {
       <ErrorBoundary area="dialog">
         <MatchChooser />
         <DeleteDialog />
+      </ErrorBoundary>
+      <ErrorBoundary area="SCORM assistant">
+        <ScormAssistant />
       </ErrorBoundary>
       <ProgressWindow />
     </div>

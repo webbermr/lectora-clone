@@ -9,6 +9,10 @@ services:
     # Other computers use the HTTPS service below.
     ports:
       - "127.0.0.1:8080:8080"
+    environment:
+      # Optional: an Anthropic API key for SCORM, the AI assistant. Put ANTHROPIC_API_KEY=… in the .env
+      # file next to this one. Without it, people can enter their own key in SCORM's settings.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     restart: unless-stopped
     read_only: true
     tmpfs:
