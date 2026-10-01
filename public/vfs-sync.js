@@ -104,6 +104,29 @@
     g.__lcLive = true;
     window.trivExitPage = g;
   };
-  var timer = setInterval(wrap, 250);
+  // Lectora's timers (ObjProgress: the session timeout, the 7-second counter) act when they run out, through
+  // the timer's onDone (progress19923.onDone = progress19923onDone). In Live edit that does nothing.
+  var stopTimers = function () {
+    var P = window.ObjProgress;
+    if (typeof P !== 'function') return;
+    var keys = Object.keys(window);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (!/^progress\w*$/.test(k)) continue;
+      var v;
+      try { v = window[k]; } catch (e) { continue; }
+      if (typeof v === 'function' && /onDone$/.test(k) && !v.__lcLive) window[k] = held_(v, k);
+      else if (v instanceof P && typeof v.onDone === 'function' && !v.onDone.__lcLive) v.onDone = held_(v.onDone, k);
+    }
+  };
+  var held_ = function (f, name) {
+    var g = function () {
+      if (live()) { held('timer'); return; }
+      return f.apply(this, arguments);
+    };
+    g.__lcLive = true;
+    return g;
+  };
+  var timer = setInterval(function () { wrap(); stopTimers(); }, 250);
   window.addEventListener('pagehide', function () { clearInterval(timer); });
 })();
