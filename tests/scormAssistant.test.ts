@@ -33,8 +33,24 @@ describe("SCORM's tools", () => {
     expect((await runTool('read_file', { path: 'images/logo.png' }, ctx())).isError).toBe(true);
     expect((await runTool('read_file', { path: 'nope.html' }, ctx())).isError).toBe(true);
     const found = await runTool('search_files', { pattern: 'copyright \\d+' }, ctx());
-    expect(found.content).toMatch(/^1 matching lines in 1 file\na001_welcome\.html:\d+: text5\.addInnerText/);
+    expect(found.content).toMatch(/^1 matching lines \(1 different\)\. .*\na001_welcome\.html:\d+ \(offset \d+\): text5\.addInnerText/);
     expect((await runTool('search_files', { pattern: '(' }, ctx())).isError).toBe(true);
+  });
+
+  it("shows the text around a match deep in Lectora's long lines, and an inherited line once", async () => {
+    // Lectora's styled text: hundreds of characters of markup before the words.
+    const styles = '<div id=\\"text236596\\" style=\\"visibility:hidden;\\"><a id=\\"text236596anc\\"></a>'.repeat(6);
+    const footer = (id: string) => `<html><body><script>\n${id}.addInnerText('${styles}<p><span>Copyright © 2017 The Example Association (TEA). All rights reserved.</span></p>')\n</script></body></html>`;
+    const many: Record<string, Uint8Array> = {};
+    for (let i = 1; i <= 50; i++) many[`a001_page_${String(i).padStart(2, '0')}.html`] = encodeText(footer('text236596'));
+    many['a001_chapter2.html'] = encodeText(footer('text236384'));
+    const out = (await runTool('search_files', { pattern: 'Copyright' }, { files: many, manifest: null, courseName: 'C' })).content;
+    expect(out).toMatch(/^51 matching lines \(1 different\)/);
+    expect(out).toContain('Copyright © 2017 The Example Association (TEA). All rights reserved.');
+    expect(out).toContain('(the same text is also in 50 more: a001_page_01.html:2, ');
+    // The offset points read_file at the match.
+    const at = Number(/a001_chapter2\.html:2 \(offset (\d+)\)/.exec(out)![1]);
+    expect((await runTool('read_file', { path: 'a001_chapter2.html', offset: at }, { files: many, manifest: null, courseName: 'C' })).content.startsWith('Copyright © 2017')).toBe(true);
   });
 
   it('summarises a page: objects, text, where Next goes', () => {

@@ -6,6 +6,7 @@ import { store, useStore } from '../lib/store';
 import { encodeText } from '../lib/text';
 import type { ChatItem, EditorContext, ScormChat } from '../lib/scorm/agent';
 import { endpoint, loadConnection, saveMode, saveOwnKey, type Connection } from '../lib/scorm/connection';
+import { planAction } from '../lib/scorm/actions';
 import { applyProposal, proposalProblem, type Proposal } from '../lib/scorm/tools';
 
 const VIEW_NAMES: Record<string, string> = { edit: 'Edit', live: 'Live edit', preview: 'Preview', code: 'Code' };
@@ -129,6 +130,75 @@ function ProposalCard({ item, chat }: { item: Extract<ChatItem, { kind: 'proposa
       ) : (
         <p className="small muted">
           {item.state === 'applied' ? `Applied${item.note ? ` ${item.note}` : ''} (undo with Ctrl+Z / ⌘Z).` : item.state === 'dismissed' ? 'Dismissed.' : `Couldn't apply: ${item.note}`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const VERBS = { remove: 'Remove', restore: 'Restore', move: 'Move', answer_rule: 'Apply', answer_default: 'Apply' } as const;
+
+/** An editor action SCORM offers to do (remove, restore, move, Answer required). */
+function ActionCard({ item, chat }: { item: Extract<ChatItem, { kind: 'action' }>; chat: ScormChat }) {
+  const p = item.proposal;
+  const others = p.elsewhere;
+  const verb = VERBS[p.action.type];
+  const apply = async (everywhere: boolean) => {
+    const files = store.project?.files;
+    if (!files) return;
+    const plan = planAction(files, p, everywhere);
+    if (plan.problem) {
+      chat.settle(p.id, 'failed', plan.problem);
+      return;
+    }
+    if (plan.changes.length) await store.write(`SCORM: ${p.summary}`, plan.changes.map((c) => ({ path: c.path, bytes: encodeText(c.text) })));
+    const pages = plan.changes.filter((c) => c.path !== 'imsmanifest.xml').length;
+    const skipped = plan.skipped.length ? `; ${plan.skipped.length} page${plan.skipped.length === 1 ? '' : 's'} had changed and ${plan.skipped.length === 1 ? 'was' : 'were'} left alone` : '';
+    store.setStatus(`SCORM: ${p.summary}${pages > 1 ? ` (${pages} pages)` : ''}${skipped}. Undo with Ctrl+Z (⌘Z).`);
+    chat.settle(p.id, 'applied', everywhere && others.length ? `on ${pages} pages${skipped}` : others.length ? 'on this page only, not the other pages with the same object' : pages > 1 ? `on ${pages} pages` : undefined);
+  };
+  return (
+    <div className={`scorm-proposal scorm-${item.state}`}>
+      <div className="scorm-proposal-head">
+        <strong>{p.summary}</strong>
+        <span className="muted small">{p.path}</span>
+      </div>
+      <p className="small">{p.detail}</p>
+      {p.warning && item.state === 'pending' && <p className="small warn-text">⚠ {p.warning}</p>}
+      {others.length > 0 && item.state === 'pending' && (
+        <details className="small">
+          <summary>
+            The same object is on {others.length} other page{others.length === 1 ? '' : 's'}
+          </summary>
+          <ul className="scorm-pages">
+            {others.map((o) => (
+              <li key={o.path}>
+                {o.path}
+                {p.object && o.id !== p.object.id ? ` (as ${o.id})` : ''}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {item.state === 'pending' ? (
+        <div className="row">
+          {others.length > 0 ? (
+            <>
+              <button className="primary" onClick={() => void apply(true)}>
+                {verb} on all {others.length + 1} pages
+              </button>
+              <button onClick={() => void apply(false)}>This page only</button>
+            </>
+          ) : (
+            <button className="primary" onClick={() => void apply(false)}>
+              {verb}
+            </button>
+          )}
+          <button onClick={() => chat.settle(p.id, 'dismissed')}>Dismiss</button>
+        </div>
+      ) : (
+        <p className="small muted">
+          {item.state === 'applied' ? `Done${item.note ? ` ${item.note}` : ''} (undo with Ctrl+Z / ⌘Z).` : item.state === 'dismissed' ? 'Dismissed.' : `Couldn't do it: ${item.note}`}
         </p>
       )}
     </div>
@@ -281,7 +351,7 @@ export function ScormAssistant() {
           <div className="scorm-empty small muted">
             <p>Ask about this page or the whole course. For example:</p>
             <ul>
-              {['Why does Next not appear on this page?', 'What happens if a learner is inactive?', 'Is anything broken on this page?', 'Change "Monitoring" to "Monitoring Services" in the page title'].map((q) => (
+              {['Why does Next not appear on this page?', 'What happens if a learner is inactive?', 'Is anything broken on this page?', 'Remove the gray callout boxes on this page'].map((q) => (
                 <li key={q}>
                   <button className="link" onClick={() => setDraft(q)}>
                     {q}
@@ -289,7 +359,7 @@ export function ScormAssistant() {
                 </li>
               ))}
             </ul>
-            <p>SCORM can read any file in the package. It suggests changes for you to apply; it never changes files by itself.</p>
+            <p>SCORM can read any file in the package, and offer to edit text, remove, restore or move objects, and set Answer required. Nothing changes until you click Apply, and Ctrl+Z undoes it.</p>
           </div>
         )}
         {!needsSetup &&
@@ -315,6 +385,8 @@ export function ScormAssistant() {
                 );
               case 'proposal':
                 return <ProposalCard key={i} item={item} chat={chat} />;
+              case 'action':
+                return <ActionCard key={i} item={item} chat={chat} />;
               case 'error':
                 return (
                   <div key={i} className="scorm-error small">

@@ -218,8 +218,12 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - An AI assistant (Claude, from Anthropic) that knows which page is on screen and, in Live edit, which
   object is selected. Ask why a page misbehaves, what the course's rules are, or for a change
 - It can list, search and read any file in the package, and use the editor's course check, Rules report
-  and page summary. It suggests changes as before/after cards; nothing changes until you click
-  **Apply**, and each applied change is one undoable step (Ctrl+Z / ⌘Z)
+  and page summary. It suggests text changes as before/after cards, and offers to **remove**, **restore**
+  or **move** objects and set **Answer required?**, doing exactly what the editor's own controls do.
+  Nothing changes until you click **Apply**, and each applied change is one undoable step (Ctrl+Z / ⌘Z)
+- When the object is on other pages too (an inherited footer or button, or a chapter's own copy), the card
+  lists them and offers **all N pages** or **This page only**. Removing a button that moves the learner on
+  comes with a warning
 - Your questions and the files SCORM reads are sent to Anthropic. Text inside course files is treated
   as data, never as instructions, and passwords found in course code aren't repeated
 - Needs an Anthropic API key: either the server's (see [Ask SCORM's API key](#ask-scorms-api-key)) or

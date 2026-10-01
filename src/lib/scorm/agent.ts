@@ -6,6 +6,7 @@
  * cached prefix valid and is what the model expects.
  */
 import Anthropic from '@anthropic-ai/sdk';
+import type { ActionProposal } from './actions';
 import { TOOLS, runTool, type Proposal, type ToolContext } from './tools';
 
 export const MODEL = 'claude-opus-5-5';
@@ -15,13 +16,15 @@ export type ChatItem =
   | { kind: 'assistant'; text: string }
   | { kind: 'tool'; label: string; error?: boolean }
   | { kind: 'proposal'; proposal: Proposal; state: 'pending' | 'applied' | 'dismissed' | 'failed'; note?: string }
+  | { kind: 'action'; proposal: ActionProposal; state: 'pending' | 'applied' | 'dismissed' | 'failed'; note?: string }
   | { kind: 'error'; text: string };
 
 const SYSTEM = `You are SCORM, the assistant built into SCORM Editor, a browser app for editing published e-learning packages (SCORM 1.2/2004 zips, mostly exported from Lectora). The person using you edits courses; they are usually not a programmer. Help them understand the package they have open, find out why a page misbehaves, and fix it.
 
 What you can do
 - Look at the package with your tools: list_files, read_file, search_files, page_overview, course_check, course_rules. Look before you answer; don't guess at what a file contains.
-- Suggest changes with propose_edit. You never change files yourself: each proposal is shown to the person as a before/after with an Apply button, and applying it is one undoable step (Ctrl+Z). Say what each proposal does and why. Keep proposals small and exact; the text to replace must be copied from the file as it is now and occur exactly once.
+- Suggest text changes with propose_edit. You never change files yourself: each proposal is shown to the person as a before/after with an Apply button, and applying it is one undoable step (Ctrl+Z). Say what each proposal does and why. Keep proposals small and exact; the text to replace must be copied from the file as it is now and occur exactly once.
+- Offer to carry out editor actions with remove_object, restore_object, move_object and set_answer_required. The person sees what will happen and applies it (on this page or every page with the same object) or dismisses it. When someone asks for one of these, or one would fix the problem, offer it with the tool instead of only explaining how to do it in the editor; a short "I can do this for you, see below" is enough. Things you can't do with a tool (adding objects or pages, deleting pages, changing images or media), explain how to do in the editor.
 - Each question comes with an <editor_context> block saying which view is open, which page is on screen and, in Live edit, which object is selected. "This page", "this slide" and "this" mean those.
 
 How Lectora pages work
@@ -32,9 +35,9 @@ How Lectora pages work
 - Pages may run inside a page player (a001index.html with ?jmptopg=), where each page's scripts run in a hidden frame and draw in the player window.
 - Test settings come from an encrypted test file; course_rules reads them for you.
 
-Editor features worth pointing people to, when they fit better than an edit
-- Live edit: select an object to edit its text, move it (drag or arrow keys), or Remove it (hides it, on this page or every page that has it, and can be restored).
-- Properties: page assets, "Answer required?" for question pages.
+Editor features (what your action tools do, and what to point people to otherwise)
+- Live edit: select an object to edit its text, move it (drag or arrow keys), or Remove it (hides it, on this page or every page that has it, and can be restored). You can do the moving, removing and restoring with your tools.
+- Properties: page assets, and "Answer required?" for question pages (you can set it with set_answer_required).
 - Rules tab: a report of timers, lockouts and button rules. Check tab: broken links and other issues, with fixes.
 
 Rules
@@ -91,8 +94,8 @@ export class ScormChat {
 
   /** Tell SCORM, with the next question, what the person did with a proposal. */
   settle(id: string, state: 'applied' | 'dismissed' | 'failed', note?: string) {
-    const item = this.items.find((i) => i.kind === 'proposal' && i.proposal.id === id);
-    if (item && item.kind === 'proposal') {
+    const item = this.items.find((i) => (i.kind === 'proposal' || i.kind === 'action') && i.proposal.id === id);
+    if (item && (item.kind === 'proposal' || item.kind === 'action')) {
       item.state = state;
       item.note = note;
       this.notes.push(`Proposal ${id} (${item.proposal.summary}): ${state === 'applied' ? `applied by the person${note ? ` (${note})` : ''}` : state === 'dismissed' ? 'dismissed by the person' : `could not be applied: ${note}`}.`);
@@ -144,6 +147,7 @@ export class ScormChat {
           }
           this.items.push({ kind: 'tool', label: out.label, error: out.isError });
           if (out.proposal) this.items.push({ kind: 'proposal', proposal: out.proposal, state: 'pending' });
+          if (out.action) this.items.push({ kind: 'action', proposal: out.action, state: 'pending' });
           results.push({ type: 'tool_result', tool_use_id: use.id, content: out.content, is_error: out.isError || undefined });
           this.emit();
         }

@@ -15,6 +15,7 @@ import type { FileMap } from '../package';
 import { isHtmlFile, isTextFile } from '../paths';
 import { hiddenIds } from '../removeObjects';
 import { readRule } from '../answerRule';
+import { proposeAction, type ActionProposal, type ObjectAction } from './actions';
 
 export interface ToolContext {
   files: FileMap;
@@ -38,9 +39,12 @@ export interface Proposal {
   object?: { id: string; name: string };
 }
 
-export type ToolOutcome = { content: string; isError?: boolean; proposal?: Proposal; label: string };
+export type ToolOutcome = { content: string; isError?: boolean; proposal?: Proposal; action?: ActionProposal; label: string };
 
 const READ_LIMIT = 40000;
+const SEARCH_BEFORE = 150;
+const SEARCH_AFTER = 400;
+const SEARCH_MAX = 200;
 
 const str = (description: string) => ({ type: 'string', description }) as const;
 const int = (description: string) => ({ type: 'integer', description }) as const;
@@ -65,7 +69,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: 'search_files',
     description:
-      'Search the text files of the package for a regular expression (case-insensitive). Returns matching lines as path:line: text, at most 200. Use path_prefix to narrow it.',
+      'Search the text files of the package for a regular expression (case-insensitive). Each match comes as path:line (offset N): the text around the match. Matches with the same text in many files (an inherited object) are listed once with the files they are in. To see more of a line, read_file from its offset. Use path_prefix to narrow the search.',
     input_schema: {
       type: 'object',
       properties: { pattern: str('JavaScript regular expression.'), path_prefix: str('Only search files whose path starts with this.') },
@@ -102,6 +106,50 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
         summary: str('One short sentence saying what the change does, for the person approving it.'),
       },
       required: ['path', 'find', 'replace', 'summary'],
+    },
+  },
+  {
+    name: 'remove_object',
+    description:
+      "Offer to remove an object from a page (a callout, button, image, text box), the way Remove in Live edit does: it's hidden by id, so the page's scripts keep working, and it can be restored. The person is shown what will happen and chooses this page only or every page with the same object (the editor finds those, including a chapter's own copy under another id); nothing happens until they apply it. Use the object's id from page_overview.",
+    input_schema: {
+      type: 'object',
+      properties: { path: str('Page the object is on.'), id: str('Object id, e.g. "shape58889".'), summary: str('One short sentence for the person approving it.') },
+      required: ['path', 'id', 'summary'],
+    },
+  },
+  {
+    name: 'restore_object',
+    description: 'Offer to show again an object this editor removed (page_overview lists them under "Hidden by this editor"). The person chooses this page or every page where it was removed.',
+    input_schema: {
+      type: 'object',
+      properties: { path: str('Page the object is on.'), id: str('Object id.'), summary: str('One short sentence for the person approving it.') },
+      required: ['path', 'id', 'summary'],
+    },
+  },
+  {
+    name: 'move_object',
+    description:
+      "Offer to move an object to a new position (left and top, in pixels, as page_overview gives them), the way dragging in Live edit does: copies of it at the same spot on other pages can move with it if the person chooses.",
+    input_schema: {
+      type: 'object',
+      properties: { path: str('Page the object is on.'), id: str('Object id.'), x: int('New left position in pixels.'), y: int('New top position in pixels.'), summary: str('One short sentence for the person approving it.') },
+      required: ['path', 'id', 'x', 'y', 'summary'],
+    },
+  },
+  {
+    name: 'set_answer_required',
+    description:
+      'Offer to set "Answer required?" on a question page: "required" holds the learner on the page until they answer (Next hidden, Submit blocked, no auto-advance), "optional" removes that, "default" follows the course default. With all_question_pages true, it instead sets the course default for every question page that has no setting of its own (rule must then be "required" or "optional").',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: str('The question page (also needed with all_question_pages; use the page on screen).'),
+        rule: { type: 'string', enum: ['required', 'optional', 'default'], description: 'The setting.' },
+        all_question_pages: { type: 'boolean', description: 'Set the course default instead of this page.' },
+        summary: str('One short sentence for the person approving it.'),
+      },
+      required: ['path', 'rule', 'summary'],
     },
   },
 ];
@@ -205,22 +253,39 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
         return fail(`Not a valid regular expression: ${(e as Error).message}`, 'Searched the package');
       }
       const prefix = isString(args.path_prefix) ? args.path_prefix : '';
-      const out: string[] = [];
-      let filesHit = 0;
+      // Lectora writes a text object's whole styled HTML on one long line, so each match is shown with the
+      // text around it (not the start of the line), with its character offset for read_file. A line that is
+      // the same in many files (an inherited footer) is shown once, with the files it's in.
+      const hits = new Map<string, { first: string; offset: number; more: string[] }>();
+      let lineCount = 0;
+      let truncated = false;
       for (const p of Object.keys(files).sort()) {
         if (!p.startsWith(prefix) || !isTextFile(p)) continue;
-        const lines = textOf(files[p]).split('\n');
-        let hit = false;
-        for (let i = 0; i < lines.length && out.length < 200; i++) {
-          if (re.test(lines[i])) {
-            hit = true;
-            out.push(`${p}:${i + 1}: ${lines[i].trim().slice(0, 300)}`);
+        const text = textOf(files[p]);
+        let lineStart = 0;
+        let lineNo = 0;
+        for (const line of text.split('\n')) {
+          lineNo++;
+          const m = re.exec(line);
+          if (m) {
+            const from = Math.max(0, m.index - SEARCH_BEFORE);
+            const to = Math.min(line.length, m.index + m[0].length + SEARCH_AFTER);
+            const excerpt = `${from > 0 ? '…' : ''}${line.slice(from, to).trim()}${to < line.length ? '…' : ''}`;
+            const seen = hits.get(excerpt);
+            if (seen) seen.more.push(`${p}:${lineNo}`);
+            else if (hits.size < SEARCH_MAX) hits.set(excerpt, { first: `${p}:${lineNo}`, offset: lineStart + m.index, more: [] });
+            else truncated = true;
+            lineCount++;
           }
+          lineStart += line.length + 1;
         }
-        if (hit) filesHit++;
-        if (out.length >= 200) break;
       }
-      const head = out.length ? `${out.length}${out.length >= 200 ? '+' : ''} matching lines in ${filesHit} file${filesHit === 1 ? '' : 's'}` : 'No matches.';
+      if (!hits.size) return { content: 'No matches.', label: `Searched for "${args.pattern}"` };
+      const out = [...hits].map(([excerpt, h]) => {
+        const also = h.more.length ? `\n  (the same text is also in ${h.more.length} more: ${h.more.slice(0, 40).join(', ')}${h.more.length > 40 ? ', …' : ''})` : '';
+        return `${h.first} (offset ${h.offset}): ${excerpt}${also}`;
+      });
+      const head = `${lineCount} matching lines (${hits.size} different)${truncated ? `; only the first ${SEARCH_MAX} different ones are shown, narrow the search` : ''}. Excerpts show up to ${SEARCH_BEFORE} characters before and ${SEARCH_AFTER} after each match; read_file with the offset shows more.`;
       return { content: [head, ...out].join('\n'), label: `Searched for "${args.pattern}"` };
     }
     case 'page_overview': {
@@ -259,6 +324,42 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
         content: `Proposal ${proposal.id} is shown to the person for review. It is not applied yet; you will be told if they apply or dismiss it.${more}`,
         proposal,
         label: `Proposed a change to ${path}`,
+      };
+    }
+    case 'remove_object':
+    case 'restore_object':
+    case 'move_object':
+    case 'set_answer_required': {
+      const { path, id, summary } = args;
+      const verb = { remove_object: 'removing', restore_object: 'restoring', move_object: 'moving', set_answer_required: 'setting Answer required on' }[name];
+      if (!isString(path) || !isString(summary) || (name !== 'set_answer_required' && !isString(id))) {
+        return fail('INVALID_INPUT: path, summary and (for objects) id are required strings.', `Offered ${verb} an object`);
+      }
+      let action: ObjectAction;
+      if (name === 'remove_object') action = { type: 'remove', id: id as string };
+      else if (name === 'restore_object') action = { type: 'restore', id: id as string };
+      else if (name === 'move_object') {
+        if (typeof args.x !== 'number' || typeof args.y !== 'number') return fail('INVALID_INPUT: x and y must be numbers.', 'Offered moving an object');
+        action = { type: 'move', id: id as string, x: args.x, y: args.y };
+      } else {
+        const rule = args.rule;
+        if (rule !== 'required' && rule !== 'optional' && rule !== 'default') return fail('INVALID_INPUT: rule must be "required", "optional" or "default".', 'Offered setting Answer required');
+        if (args.all_question_pages === true) {
+          if (rule === 'default') return fail('For all question pages, rule must be "required" or "optional".', 'Offered setting Answer required');
+          action = { type: 'answer_default', rule };
+        } else action = { type: 'answer_rule', rule };
+      }
+      const made = proposeAction(files, path, action, `p${++proposalCount}`, summary);
+      const target = name === 'set_answer_required' ? path : `${id} on ${path}`;
+      if (typeof made === 'string') return fail(made, `Offered ${verb} ${target}`);
+      const more = made.elsewhere.length
+        ? ` The same object is on ${made.elsewhere.length} other page${made.elsewhere.length === 1 ? '' : 's'} (${made.elsewhere.slice(0, 10).map((e) => e.path).join(', ')}${made.elsewhere.length > 10 ? ', …' : ''}); the person is offered this page only or all of them, so don't offer those pages separately.`
+        : '';
+      const warn = made.warning ? ` They are warned: ${made.warning}` : '';
+      return {
+        content: `Offer ${made.id} is shown to the person: ${made.detail} It is not done yet; you will be told if they apply or dismiss it.${more}${warn}`,
+        action: made,
+        label: `Offered ${verb} ${target}`,
       };
     }
     default:
