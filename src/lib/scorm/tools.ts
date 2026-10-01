@@ -41,6 +41,9 @@ export interface Proposal {
 export type ToolOutcome = { content: string; isError?: boolean; proposal?: Proposal; label: string };
 
 const READ_LIMIT = 40000;
+const SEARCH_BEFORE = 150;
+const SEARCH_AFTER = 400;
+const SEARCH_MAX = 200;
 
 const str = (description: string) => ({ type: 'string', description }) as const;
 const int = (description: string) => ({ type: 'integer', description }) as const;
@@ -65,7 +68,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: 'search_files',
     description:
-      'Search the text files of the package for a regular expression (case-insensitive). Returns matching lines as path:line: text, at most 200. Use path_prefix to narrow it.',
+      'Search the text files of the package for a regular expression (case-insensitive). Each match comes as path:line (offset N): the text around the match. Matches with the same text in many files (an inherited object) are listed once with the files they are in. To see more of a line, read_file from its offset. Use path_prefix to narrow the search.',
     input_schema: {
       type: 'object',
       properties: { pattern: str('JavaScript regular expression.'), path_prefix: str('Only search files whose path starts with this.') },
@@ -205,22 +208,39 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
         return fail(`Not a valid regular expression: ${(e as Error).message}`, 'Searched the package');
       }
       const prefix = isString(args.path_prefix) ? args.path_prefix : '';
-      const out: string[] = [];
-      let filesHit = 0;
+      // Lectora writes a text object's whole styled HTML on one long line, so each match is shown with the
+      // text around it (not the start of the line), with its character offset for read_file. A line that is
+      // the same in many files (an inherited footer) is shown once, with the files it's in.
+      const hits = new Map<string, { first: string; offset: number; more: string[] }>();
+      let lineCount = 0;
+      let truncated = false;
       for (const p of Object.keys(files).sort()) {
         if (!p.startsWith(prefix) || !isTextFile(p)) continue;
-        const lines = textOf(files[p]).split('\n');
-        let hit = false;
-        for (let i = 0; i < lines.length && out.length < 200; i++) {
-          if (re.test(lines[i])) {
-            hit = true;
-            out.push(`${p}:${i + 1}: ${lines[i].trim().slice(0, 300)}`);
+        const text = textOf(files[p]);
+        let lineStart = 0;
+        let lineNo = 0;
+        for (const line of text.split('\n')) {
+          lineNo++;
+          const m = re.exec(line);
+          if (m) {
+            const from = Math.max(0, m.index - SEARCH_BEFORE);
+            const to = Math.min(line.length, m.index + m[0].length + SEARCH_AFTER);
+            const excerpt = `${from > 0 ? '…' : ''}${line.slice(from, to).trim()}${to < line.length ? '…' : ''}`;
+            const seen = hits.get(excerpt);
+            if (seen) seen.more.push(`${p}:${lineNo}`);
+            else if (hits.size < SEARCH_MAX) hits.set(excerpt, { first: `${p}:${lineNo}`, offset: lineStart + m.index, more: [] });
+            else truncated = true;
+            lineCount++;
           }
+          lineStart += line.length + 1;
         }
-        if (hit) filesHit++;
-        if (out.length >= 200) break;
       }
-      const head = out.length ? `${out.length}${out.length >= 200 ? '+' : ''} matching lines in ${filesHit} file${filesHit === 1 ? '' : 's'}` : 'No matches.';
+      if (!hits.size) return { content: 'No matches.', label: `Searched for "${args.pattern}"` };
+      const out = [...hits].map(([excerpt, h]) => {
+        const also = h.more.length ? `\n  (the same text is also in ${h.more.length} more: ${h.more.slice(0, 40).join(', ')}${h.more.length > 40 ? ', …' : ''})` : '';
+        return `${h.first} (offset ${h.offset}): ${excerpt}${also}`;
+      });
+      const head = `${lineCount} matching lines (${hits.size} different)${truncated ? `; only the first ${SEARCH_MAX} different ones are shown, narrow the search` : ''}. Excerpts show up to ${SEARCH_BEFORE} characters before and ${SEARCH_AFTER} after each match; read_file with the offset shows more.`;
       return { content: [head, ...out].join('\n'), label: `Searched for "${args.pattern}"` };
     }
     case 'page_overview': {
