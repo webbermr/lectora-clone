@@ -141,9 +141,10 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   of a different format, shape or transparency asks first. It includes files the page's script only names
   (audio played by an action, a popup not yet open), marks what's on screen, and lets you
   **Show** or **Replace** each one. Lectora's transparent spacer GIFs are left out
-- Nothing on the page starts by itself: narration and video wait until you press play, and the page
-  doesn't move on by itself (narration ending, auto-advance, timers, the session timeout); the status
-  bar says when something was held back. Your own clicks work as usual, so in Interact mode Next and
+- Nothing on the page starts by itself: narration and video wait until you press play, the page
+  doesn't move on by itself (narration ending, auto-advance), and Lectora's timers do nothing when they
+  run out (no session-timeout warning or redirect, no auto-advance counters); the status bar says when
+  something was held back. Your own clicks work as usual, so in Interact mode Next and
   menus take you on. **Preview** plays the course exactly as learners see it, including the course's
   own choice of advancing automatically or by clicking Next
 - **Interact** mode lets you click through a single-page player to the screen you want.

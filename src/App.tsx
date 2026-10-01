@@ -36,6 +36,8 @@ export function App() {
       store.setStatus(
         what === 'narration'
           ? 'Live edit doesn\'t start narration or video by itself; press play on the page to hear it. Preview plays the course as learners see it.'
+          : what === 'timer'
+            ? 'A timer on this page ran out; Live edit doesn\'t act on timers (session timeout, auto-advance counters). Preview runs them as learners see them.'
           : `Live edit held back an automatic move to ${what}. Use Interact (I) and click Next to move on, or Preview to run the course as learners see it.`,
       );
   }, [s.view]);

@@ -62,6 +62,34 @@ describe('Live edit: nothing on a page starts by itself', () => {
     expect(went).toEqual(['a001_next.html']);
   });
 
+  it("doesn't act on Lectora's timers (session timeout, counters) when they run out", () => {
+    vi.useFakeTimers();
+    const held = load('live');
+    const w = window as unknown as Record<string, unknown>;
+    // Like trivantis-progress.js and a page's script: the timer object keeps its own reference to onDone.
+    function ObjProgress(this: { onDone: () => void }) {
+      this.onDone = () => {};
+    }
+    const fired: string[] = [];
+    w.ObjProgress = ObjProgress;
+    w.progress19923onDone = () => fired.push('timeout warning');
+    const timerObj = new (ObjProgress as unknown as new () => { onDone: () => void })();
+    timerObj.onDone = w.progress19923onDone as () => void;
+    w.progress19923 = timerObj;
+    vi.advanceTimersByTime(300);
+    timerObj.onDone(); // the timer runs out
+    (w.progress19923onDone as () => void)();
+    expect(fired).toEqual([]);
+    expect(held).toContain('timer');
+    // Back in Preview the same timer acts as the course made it.
+    (window as EditorWindow).__lcStage = 'preview';
+    timerObj.onDone();
+    expect(fired).toEqual(['timeout warning']);
+    delete w.ObjProgress;
+    delete w.progress19923;
+    delete w.progress19923onDone;
+  });
+
   it('leaves Preview alone', () => {
     vi.useFakeTimers();
     load('preview');
