@@ -15,6 +15,7 @@ import type { FileMap } from '../package';
 import { isHtmlFile, isTextFile } from '../paths';
 import { hiddenIds } from '../removeObjects';
 import { readRule } from '../answerRule';
+import { proposeAction, type ActionProposal, type ObjectAction } from './actions';
 
 export interface ToolContext {
   files: FileMap;
@@ -38,7 +39,7 @@ export interface Proposal {
   object?: { id: string; name: string };
 }
 
-export type ToolOutcome = { content: string; isError?: boolean; proposal?: Proposal; label: string };
+export type ToolOutcome = { content: string; isError?: boolean; proposal?: Proposal; action?: ActionProposal; label: string };
 
 const READ_LIMIT = 40000;
 const SEARCH_BEFORE = 150;
@@ -105,6 +106,50 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
         summary: str('One short sentence saying what the change does, for the person approving it.'),
       },
       required: ['path', 'find', 'replace', 'summary'],
+    },
+  },
+  {
+    name: 'remove_object',
+    description:
+      "Offer to remove an object from a page (a callout, button, image, text box), the way Remove in Live edit does: it's hidden by id, so the page's scripts keep working, and it can be restored. The person is shown what will happen and chooses this page only or every page with the same object (the editor finds those, including a chapter's own copy under another id); nothing happens until they apply it. Use the object's id from page_overview.",
+    input_schema: {
+      type: 'object',
+      properties: { path: str('Page the object is on.'), id: str('Object id, e.g. "shape58889".'), summary: str('One short sentence for the person approving it.') },
+      required: ['path', 'id', 'summary'],
+    },
+  },
+  {
+    name: 'restore_object',
+    description: 'Offer to show again an object this editor removed (page_overview lists them under "Hidden by this editor"). The person chooses this page or every page where it was removed.',
+    input_schema: {
+      type: 'object',
+      properties: { path: str('Page the object is on.'), id: str('Object id.'), summary: str('One short sentence for the person approving it.') },
+      required: ['path', 'id', 'summary'],
+    },
+  },
+  {
+    name: 'move_object',
+    description:
+      "Offer to move an object to a new position (left and top, in pixels, as page_overview gives them), the way dragging in Live edit does: copies of it at the same spot on other pages can move with it if the person chooses.",
+    input_schema: {
+      type: 'object',
+      properties: { path: str('Page the object is on.'), id: str('Object id.'), x: int('New left position in pixels.'), y: int('New top position in pixels.'), summary: str('One short sentence for the person approving it.') },
+      required: ['path', 'id', 'x', 'y', 'summary'],
+    },
+  },
+  {
+    name: 'set_answer_required',
+    description:
+      'Offer to set "Answer required?" on a question page: "required" holds the learner on the page until they answer (Next hidden, Submit blocked, no auto-advance), "optional" removes that, "default" follows the course default. With all_question_pages true, it instead sets the course default for every question page that has no setting of its own (rule must then be "required" or "optional").',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: str('The question page (also needed with all_question_pages; use the page on screen).'),
+        rule: { type: 'string', enum: ['required', 'optional', 'default'], description: 'The setting.' },
+        all_question_pages: { type: 'boolean', description: 'Set the course default instead of this page.' },
+        summary: str('One short sentence for the person approving it.'),
+      },
+      required: ['path', 'rule', 'summary'],
     },
   },
 ];
@@ -279,6 +324,42 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
         content: `Proposal ${proposal.id} is shown to the person for review. It is not applied yet; you will be told if they apply or dismiss it.${more}`,
         proposal,
         label: `Proposed a change to ${path}`,
+      };
+    }
+    case 'remove_object':
+    case 'restore_object':
+    case 'move_object':
+    case 'set_answer_required': {
+      const { path, id, summary } = args;
+      const verb = { remove_object: 'removing', restore_object: 'restoring', move_object: 'moving', set_answer_required: 'setting Answer required on' }[name];
+      if (!isString(path) || !isString(summary) || (name !== 'set_answer_required' && !isString(id))) {
+        return fail('INVALID_INPUT: path, summary and (for objects) id are required strings.', `Offered ${verb} an object`);
+      }
+      let action: ObjectAction;
+      if (name === 'remove_object') action = { type: 'remove', id: id as string };
+      else if (name === 'restore_object') action = { type: 'restore', id: id as string };
+      else if (name === 'move_object') {
+        if (typeof args.x !== 'number' || typeof args.y !== 'number') return fail('INVALID_INPUT: x and y must be numbers.', 'Offered moving an object');
+        action = { type: 'move', id: id as string, x: args.x, y: args.y };
+      } else {
+        const rule = args.rule;
+        if (rule !== 'required' && rule !== 'optional' && rule !== 'default') return fail('INVALID_INPUT: rule must be "required", "optional" or "default".', 'Offered setting Answer required');
+        if (args.all_question_pages === true) {
+          if (rule === 'default') return fail('For all question pages, rule must be "required" or "optional".', 'Offered setting Answer required');
+          action = { type: 'answer_default', rule };
+        } else action = { type: 'answer_rule', rule };
+      }
+      const made = proposeAction(files, path, action, `p${++proposalCount}`, summary);
+      const target = name === 'set_answer_required' ? path : `${id} on ${path}`;
+      if (typeof made === 'string') return fail(made, `Offered ${verb} ${target}`);
+      const more = made.elsewhere.length
+        ? ` The same object is on ${made.elsewhere.length} other page${made.elsewhere.length === 1 ? '' : 's'} (${made.elsewhere.slice(0, 10).map((e) => e.path).join(', ')}${made.elsewhere.length > 10 ? ', …' : ''}); the person is offered this page only or all of them, so don't offer those pages separately.`
+        : '';
+      const warn = made.warning ? ` They are warned: ${made.warning}` : '';
+      return {
+        content: `Offer ${made.id} is shown to the person: ${made.detail} It is not done yet; you will be told if they apply or dismiss it.${more}${warn}`,
+        action: made,
+        label: `Offered ${verb} ${target}`,
       };
     }
     default:
