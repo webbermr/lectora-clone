@@ -11,7 +11,7 @@ import { ProgressWindow } from './components/ProgressWindow';
 import { Sidebar } from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
 import { Welcome } from './components/Welcome';
-import { useStore } from './lib/store';
+import { store, useStore } from './lib/store';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ScormAssistant } from './components/ScormAssistant';
 
@@ -27,6 +27,18 @@ export function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [s.project, s.view]);
+
+  // Tells course pages which view shows them (vfs-sync.js): in Live edit nothing on a page starts by itself.
+  useEffect(() => {
+    const w = window as unknown as { __lcStage?: string; __lcOnHeld?: (what: string) => void };
+    w.__lcStage = s.view;
+    w.__lcOnHeld = (what) =>
+      store.setStatus(
+        what === 'narration'
+          ? 'Live edit doesn\'t start narration or video by itself; press play on the page to hear it. Preview plays the course as learners see it.'
+          : `Live edit held back an automatic move to ${what}. Use Interact (I) and click Next to move on, or Preview to run the course as learners see it.`,
+      );
+  }, [s.view]);
 
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {

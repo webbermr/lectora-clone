@@ -91,7 +91,7 @@ export function LiveStage({ width }: { width: string }) {
       </div>
       <div className="stage-scroll">
         <div className="stage-frame" style={{ width }}>
-          <iframe ref={iframeRef} key={`${src}#${nonce}`} src={src} title="Live editor" className="stage-iframe" allow="autoplay; fullscreen" />
+          <iframe ref={iframeRef} key={`${src}#${nonce}#${s.stageReloads}`} src={src} title="Live editor" className="stage-iframe" allow="autoplay; fullscreen" />
         </div>
       </div>
     </div>

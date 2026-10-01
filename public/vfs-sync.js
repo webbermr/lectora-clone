@@ -48,3 +48,62 @@
     ['readystatechange', 'load', 'loadend'].forEach(function (t) { try { xhr.dispatchEvent(new Event(t)); } catch (e) {} });
   };
 })();
+
+// In Live edit nothing on the page starts by itself: narration and video don't play until you press
+// play, and the page doesn't move on by itself (narration ending, a timer, a session timeout). Your own
+// clicks and keys still work, so in Interact mode Next, menus and play buttons behave as usual. Preview
+// is left alone and plays the course as a learner sees it.
+(function () {
+  var editor = null;
+  try {
+    for (var w = window; ; w = w.parent) {
+      if (w.__lcStage !== undefined) { editor = w; break; }
+      if (w === w.parent) break;
+    }
+  } catch (e) {
+    return; // not inside the editor
+  }
+  if (!editor) return;
+  var live = function () { return editor.__lcStage === 'live'; };
+  var now = function () { return new Date().getTime(); };
+  // A new page (or a page the player loads into a frame) starts now: clicks before this don't count for it,
+  // so clicking Next doesn't let the next page's narration start by itself.
+  editor.__lcPageStart = now();
+  var gesture = function () { editor.__lcLastGesture = now(); };
+  ['pointerdown', 'mousedown', 'touchstart', 'keydown'].forEach(function (t) { window.addEventListener(t, gesture, true); });
+  var askedFor = function (within) {
+    var g = editor.__lcLastGesture || 0;
+    return g >= (editor.__lcPageStart || 0) && now() - g < within;
+  };
+  var held = function (what) {
+    try { if (typeof editor.__lcOnHeld === 'function') editor.__lcOnHeld(what); } catch (e) {}
+  };
+
+  // Media that starts without a click or key (autoplay, or a play() the page calls) is paused at once.
+  document.addEventListener('play', function (e) {
+    var m = e.target;
+    // The browser's own media controls don't pass clicks to the page, but they take focus when used.
+    if (!live() || askedFor(2000) || (m && m.ownerDocument && m.ownerDocument.activeElement === m)) return;
+    if (m && typeof m.pause === 'function') {
+      m.pause();
+      held('narration');
+    }
+  }, true);
+
+  // Lectora moves between pages with trivExitPage (defined by each page's own script, after this one).
+  // A move nobody clicked for is held back.
+  var wrap = function () {
+    var f = window.trivExitPage;
+    if (typeof f !== 'function' || f.__lcLive) return;
+    var g = function (url) {
+      if (live() && !askedFor(3000)) { held(String(url || '').split('/').pop()); return; }
+      // The click that moved on doesn't count for the next page (players that swap pages in one window).
+      editor.__lcPageStart = now() + 1;
+      return f.apply(this, arguments);
+    };
+    g.__lcLive = true;
+    window.trivExitPage = g;
+  };
+  var timer = setInterval(wrap, 250);
+  window.addEventListener('pagehide', function () { clearInterval(timer); });
+})();

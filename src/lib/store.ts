@@ -48,6 +48,8 @@ class Store {
   undoStack: UndoEntry[] = [];
   redoStack: UndoEntry[] = [];
   saveState: 'saved' | 'saving' | 'dirty' | 'error' = 'saved';
+  /** Bumped to reload the page Live edit or Preview is showing (after SCORM changes it, say). */
+  stageReloads = 0;
   status = '';
 
   private version = 0;
@@ -205,6 +207,16 @@ class Store {
     const next = path === this.currentPath ? null : path;
     if (next === this.viewingPath) return;
     this.viewingPath = next;
+    this.emit();
+  }
+
+  /** Reload the page on stage, staying on the page the learner moved on to. */
+  reloadStage() {
+    if (this.viewingPath) {
+      this.currentPath = this.viewingPath;
+      this.viewingPath = null;
+    }
+    this.stageReloads++;
     this.emit();
   }
 

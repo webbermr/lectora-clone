@@ -61,7 +61,7 @@ export function PreviewStage({ width }: { width: string }) {
       <div className="preview-body">
         <div className="stage-scroll">
           <div className="stage-frame" style={{ width }}>
-            <iframe ref={frame} key={`${src}#${nonce}`} src={src} title="Course preview" className="stage-iframe" allow="autoplay; fullscreen" />
+            <iframe ref={frame} key={`${src}#${nonce}#${s.stageReloads}`} src={src} title="Course preview" className="stage-iframe" allow="autoplay; fullscreen" />
           </div>
         </div>
         {showLog && (
