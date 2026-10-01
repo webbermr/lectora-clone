@@ -14,6 +14,7 @@ import { Welcome } from './components/Welcome';
 import { store, useStore } from './lib/store';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ScormAssistant } from './components/ScormAssistant';
+import { PublishDialog } from './components/PublishDialog';
 
 export function App() {
   const s = useStore();
@@ -89,6 +90,7 @@ export function App() {
       <ErrorBoundary area="dialog">
         <MatchChooser />
         <DeleteDialog />
+        <PublishDialog />
       </ErrorBoundary>
       <ErrorBoundary area="SCORM assistant">
         <ScormAssistant />

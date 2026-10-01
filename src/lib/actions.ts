@@ -7,6 +7,8 @@ import { basename, extname, relative } from './paths';
 import { newId, store, type FileChange } from './store';
 import { SCORM_HELPER_JS, SCORM_HELPER_PATH, newPageHtml } from './templates';
 import { decodeText, encodeText } from './text';
+import { findUnused } from './unused';
+import { askAboutUnused } from './publishReview';
 
 const IMPORT_STEPS = ['Read zip', 'Extract files', 'Set up preview', 'Save in browser'];
 
@@ -186,35 +188,78 @@ export async function renameProjectFile(from: string, to: string) {
   ]);
 }
 
-export async function exportPackage() {
+/** Publish: first offer to leave out files nothing in the course uses, then build the zip. */
+export async function publishPackage() {
+  if (task.running()) return;
+  const p = store.project!;
+  store.setStatus('Checking which files the course uses…');
+  await yieldToPaint();
+  let leaveOut = new Set<string>();
+  try {
+    const unused = findUnused(p.files, p.manifest);
+    if (unused.paths.length) {
+      const sizes = Object.fromEntries(unused.paths.map((f) => [f, p.files[f].length]));
+      const chosen = await askAboutUnused(unused, sizes, sizeOf(p.files));
+      if (!chosen) {
+        store.setStatus('Publishing cancelled.');
+        return;
+      }
+      leaveOut = chosen;
+    }
+  } catch (e) {
+    // The check is a convenience: if it fails, publish everything as before.
+    console.error(e);
+  }
+  await exportPackage(leaveOut);
+}
+
+/**
+ * The package as published without the given files: they're left out of the zip and of the manifest's file
+ * lists, and asset entries left with no files are dropped (with any dependencies on them). The project
+ * itself is unchanged.
+ */
+export function withoutFiles(files: FileMap, manifest: mf.ManifestModel | null, leaveOut: Set<string>): FileMap {
+  if (!leaveOut.size) return files;
+  const out: FileMap = {};
+  for (const [path, bytes] of Object.entries(files)) if (!leaveOut.has(path)) out[path] = bytes;
+  if (files['imsmanifest.xml'] && manifest) {
+    const emptied = manifest.resources.filter((r) => !r.href && r.files.length > 0 && r.files.every((f) => leaveOut.has(f))).map((r) => r.identifier);
+    out['imsmanifest.xml'] = encodeText(mf.removeResourcesAndFiles(decodeText(files['imsmanifest.xml']), emptied, leaveOut));
+  }
+  return out;
+}
+
+export async function exportPackage(leaveOut: Set<string> = new Set()) {
   if (task.running()) return;
   const p = store.project!;
   const name = slug(p.manifest?.title ?? p.name) + '_scorm' + (p.manifest?.version === '2004' ? '2004' : '12') + '.zip';
-  const paths = Object.keys(p.files);
+  const files = withoutFiles(p.files, p.manifest, leaveOut);
+  const left = leaveOut.size ? ` · ${leaveOut.size.toLocaleString()} unused file${leaveOut.size === 1 ? '' : 's'} left out` : '';
+  const paths = Object.keys(files);
   const stored = paths.filter((f) => !shouldCompress(f)).length;
   const started = Date.now();
   task.start('Publishing SCORM package…', name, ['Gather files', 'Build zip', 'Save download'], {
     doneTitle: 'Published',
     failTitle: 'Publishing failed',
     note: `${stored.toLocaleString()} images, audio and video files are copied as-is, since they're already compressed; only text files (HTML, JS, CSS, XML) are compressed.`,
-    current: `Gathering ${paths.length.toLocaleString()} files (${mb(sizeOf(p.files))})…`,
+    current: `Gathering ${paths.length.toLocaleString()} files (${mb(sizeOf(files))})…`,
   });
   // Let the progress window paint before the CPU-heavy part starts.
   await yieldToPaint();
   try {
     task.step(1, { total: paths.length });
     const seen = new Set<string>();
-    const blob = await writeScormZip(p.files, ({ percent, currentFile }) => {
+    const blob = await writeScormZip(files, ({ percent, currentFile }) => {
       if (currentFile) seen.add(currentFile);
       task.progress({ percent, done: seen.size, total: paths.length, current: currentFile ? `Adding ${currentFile}` : null });
     });
     task.step(2, { current: 'Handing the file to your browser…' });
     download(blob, name);
     const secs = ((Date.now() - started) / 1000).toFixed(1);
-    task.finish(`${mb(blob.size)} zip · ${paths.length.toLocaleString()} files in ${secs}s`, {
+    task.finish(`${mb(blob.size)} zip · ${paths.length.toLocaleString()} files in ${secs}s${left}`, {
       action: { label: 'Download again', run: () => download(blob, name) },
     });
-    store.setStatus(`Published ${name} (${mb(blob.size)})`);
+    store.setStatus(`Published ${name} (${mb(blob.size)})${left}`);
   } catch (e) {
     console.error(e);
     task.fail(e);
