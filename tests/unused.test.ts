@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { findUnused } from '../src/lib/unused';
-import { withoutFiles } from '../src/lib/actions';
+import { BLANK_GIF, withoutFiles } from '../src/lib/actions';
+import { setHidden } from '../src/lib/removeObjects';
 import { parseManifest } from '../src/lib/manifest';
 import { encodeText } from '../src/lib/text';
 
@@ -50,4 +51,34 @@ describe('files nothing in the course uses', () => {
     expect(files['old_page.html']).toBeDefined(); // the project keeps everything
     expect(withoutFiles(files, m, new Set())).toBe(files);
   });
+
+  it('counts pictures only removed objects show as unused, and blanks them on the published page', () => {
+    const files = course();
+    const page = [
+      '<html><head></head><body><script>',
+      "image1 = new ObjImage('image1','images/a.png','Logo',0,0,10,10,1,1,'div',null,0)",
+      "button2 = new ObjButton('button2','Next',0,0,10,10)",
+      'button2.setImages({"disabledState":"","downState":"images/button2_down.png","normalState":"images/button2.png","overState":""});',
+      'button2.build();',
+      "shape3 = new ObjImage('shape3','images/d.png','Line',0,0,10,10,1,2,'div','',0)",
+      '</script></body></html>',
+    ].join('\n');
+    // button2 removed in the editor; the logo also stays on index.html, so it's still used.
+    files['page2.html'] = encodeText(setHidden(page, ['button2', 'shape3']).replace('</script>', "var snd = 'media/b.mp3';</script>"));
+    files['images/button2.png'] = new Uint8Array(10);
+    files['images/button2_down.png'] = new Uint8Array(10);
+    files['index.html'] = encodeText(new TextDecoder().decode(files['index.html']).replace('</body>', '<a href="page2.html">2</a></body>'));
+    const m = parseManifest(new TextDecoder().decode(files['imsmanifest.xml']));
+    const r = findUnused(files, m);
+    expect(r.paths).toEqual(expect.arrayContaining(['images/button2.png', 'images/button2_down.png', 'images/d.png']));
+    expect(r.paths).not.toContain('images/a.png');
+    expect(r.removedOnly.sort()).toEqual(['images/button2.png', 'images/button2_down.png', 'images/d.png']);
+
+    const out = withoutFiles(files, m, new Set(r.removedOnly));
+    const html = new TextDecoder().decode(out['page2.html']);
+    expect(html).toContain(`"normalState":"${BLANK_GIF}"`);
+    expect(html).toContain(`'shape3','${BLANK_GIF}'`);
+    expect(html).toContain("'image1','images/a.png'");
+  });
 });
+

@@ -4,7 +4,8 @@ import { extname } from '../lib/paths';
 
 const mb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-const GROUPS: { label: string; test: (path: string) => boolean }[] = [
+const GROUPS: { label: string; test: (path: string, removedOnly: Set<string>) => boolean }[] = [
+  { label: 'Pictures of removed objects', test: (p, removed) => removed.has(p) },
   { label: 'Pages', test: (p) => /^\.x?html?$/.test(extname(p)) },
   { label: 'Images', test: (p) => /^\.(png|jpe?g|gif|svg|webp|bmp|ico)$/.test(extname(p)) },
   { label: 'Audio and video', test: (p) => /^\.(mp3|m4a|wav|ogg|oga|aac|mp4|m4v|webm|ogv|mov|flv|swf)$/.test(extname(p)) },
@@ -23,8 +24,9 @@ export function PublishDialog() {
   const groups = useMemo(() => {
     if (!review) return [];
     const left = new Set(review.unused.paths);
+    const removed = new Set(review.unused.removedOnly);
     return GROUPS.map((g) => {
-      const paths = [...left].filter(g.test);
+      const paths = [...left].filter((p) => g.test(p, removed));
       paths.forEach((p) => left.delete(p));
       return { label: g.label, paths };
     }).filter((g) => g.paths.length);
@@ -52,8 +54,9 @@ export function PublishDialog() {
           Your project keeps them either way.
         </p>
         <p className="small muted">
-          Untick anything you want to keep. Pages only reachable from removed links, pictures of deleted objects and leftovers from
-          earlier versions usually end up here. The course player's own files are always kept.
+          Untick anything you want to keep. Pages only reachable from removed links, pictures of objects you removed and leftovers from
+          earlier versions usually end up here. A removed object stays hidden on its page, so leaving its pictures out changes
+          nothing on screen. The course player's own files are always kept.
         </p>
         <div className="publish-groups">
           {groups.map((g) => {

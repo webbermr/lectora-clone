@@ -344,6 +344,38 @@ export function removeResourcesAndFiles(xml: string, resourceIds: Iterable<strin
   return serialize(doc, xml);
 }
 
+/**
+ * Copy resource `fromId` as `toId` for a copied page: the same files and dependencies, with `fromFile` swapped
+ * for `toFile`. It goes straight after the original, and everything that depends on the original (Lectora's
+ * course resource, other pages) depends on the copy too.
+ */
+export function cloneResource(xml: string, fromId: string, toId: string, fromFile: string, toFile: string): string {
+  const doc = parse(xml);
+  const res = Array.from(doc.getElementsByTagNameNS('*', 'resource')).find((r) => r.getAttribute('identifier') === fromId);
+  if (!res) return xml;
+  const swap = (el: Element) => {
+    const href = el.getAttribute('href');
+    if (href !== null && decodeHref(href) === fromFile) el.setAttribute('href', toFile);
+  };
+  const copy = res.cloneNode(true) as Element;
+  copy.setAttribute('identifier', toId);
+  swap(copy);
+  kids(copy, 'file').forEach(swap);
+  const ws = res.previousSibling?.nodeType === 3 && !res.previousSibling.textContent!.trim() ? res.previousSibling.textContent! : '\n';
+  res.parentNode!.insertBefore(doc.createTextNode(ws), res.nextSibling);
+  res.parentNode!.insertBefore(copy, res.nextSibling!.nextSibling);
+  for (const dep of Array.from(doc.getElementsByTagNameNS('*', 'dependency'))) {
+    if (dep.getAttribute('identifierref') !== fromId || dep.parentNode === copy) continue;
+    const twin = dep.cloneNode(false) as Element;
+    twin.setAttribute('identifierref', toId);
+    const before = dep.previousSibling;
+    const indent = before?.nodeType === 3 && !before.textContent!.trim() ? before.textContent! : '';
+    dep.parentNode!.insertBefore(twin, dep.nextSibling);
+    if (indent) dep.parentNode!.insertBefore(doc.createTextNode(indent), twin);
+  }
+  return serialize(doc, xml);
+}
+
 export function createManifest(version: ScormVersion, title: string): string {
   const id = uid('COURSE');
   const esc = title.replace(/&/g, '&amp;').replace(/</g, '&lt;');
