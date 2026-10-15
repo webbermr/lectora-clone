@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { undoShortcut } from './lib/undoKeys';
 import { CodeView } from './components/CodeView';
 import { DeleteDialog } from './components/DeleteDialog';
+import { PageOpDialog } from './components/PageOpDialog';
 import { EditStage, handleEditorKey } from './components/EditStage';
 import { LiveStage } from './components/LiveStage';
 import { MatchChooser } from './components/MatchChooser';
@@ -90,6 +91,7 @@ export function App() {
       <ErrorBoundary area="dialog">
         <MatchChooser />
         <DeleteDialog />
+        <PageOpDialog />
         <PublishDialog />
       </ErrorBoundary>
       <ErrorBoundary area="SCORM assistant">

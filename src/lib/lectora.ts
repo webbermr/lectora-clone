@@ -598,8 +598,8 @@ export function isTocFile(path: string): boolean {
 }
 
 const STR = String.raw`"(?:[^"\\]|\\.)*"`;
-const TOC_FOLDER = new RegExp(String.raw`^(\s*)(\w+)\s*=\s*insertFolder\(\s*(\w+)\s*,\s*NewFolder\(\s*(${STR})\s*,\s*"([^"]*)"\s*,\s*"\w*"\s*,\s*\d+\s*\)\s*\)\s*;?\s*$`);
-const TOC_ENTRY = new RegExp(String.raw`^\s*insertEntry\(\s*(\w+)\s*,\s*NewLink\(\s*(${STR})\s*,\s*"([^"]*)"\s*,\s*"\w*"\s*,\s*\d+\s*\)\s*\)\s*;?\s*$`);
+export const TOC_FOLDER = new RegExp(String.raw`^(\s*)(\w+)\s*=\s*insertFolder\(\s*(\w+)\s*,\s*NewFolder\(\s*(${STR})\s*,\s*"([^"]*)"\s*,\s*"\w*"\s*,\s*\d+\s*\)\s*\)\s*;?\s*$`);
+export const TOC_ENTRY = new RegExp(String.raw`^\s*insertEntry\(\s*(\w+)\s*,\s*NewLink\(\s*(${STR})\s*,\s*"([^"]*)"\s*,\s*"\w*"\s*,\s*\d+\s*\)\s*\)\s*;?\s*$`);
 
 interface TocFolderLine {
   line: number;
@@ -767,7 +767,7 @@ export function findProgressTotals(files: FileMap): ProgressTotal[] {
 }
 
 /** Lower a fixed total wherever it's written: its declared default, and progress bars sized to it. */
-function retargetTotal(text: string, counter: string, total: string, before: number, after: number): string {
+export function retargetTotal(text: string, counter: string, total: string, before: number, after: number): string {
   let out = text.replace(
     new RegExp(`(\\b${reEscape(total)}\\s*=\\s*new\\s+Variable\\(\\s*['"]${reEscape(total)}['"]\\s*,\\s*['"])${before}(['"])`, 'g'),
     `$1${after}$2`,

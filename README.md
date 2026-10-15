@@ -101,6 +101,23 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
 - The course check runs straight after, and the whole delete is one undo step. A broken link it
   finds has a **Fix** button: pick the page it should go to and the link is repointed
 
+**Moving and copying Lectora pages** (Title Explorer: select a page, then ↑ / ↓, **Move…** or **⧉ Copy…**)
+- Pick where it goes (after or before any page, grouped by chapter) and review every change before
+  anything is touched; then the course check runs, and the whole change is one undo step
+- A move closes the gap in the Next/Back chain where the page was and opens one where it goes (its own
+  Back and Next follow), moves it in Lectora's page tracking and the table of contents, keeps each
+  chapter's TOC link on its first page, and renumbers "Page X of Y" in both chapters. Moved into another
+  chapter, the page is renamed to that chapter's file prefix (`a001_reporting_when_to_report.html` into
+  Workplace Safety → `a001_workplace_safety_when_to_report.html`), with every link to it and the manifest
+  updated, so the Title Explorer and an author both see it in the right chapter
+- A copy is a new page (`…_copy.html`) with its own page id for visit tracking and title "… (copy)",
+  slotted into the chain, page tracking (and Lectora's page count) and the table of contents, with its
+  own manifest resource listed wherever the original's is. Course progress totals the original adds to
+  are raised by one page's worth, so progress can still reach 100%. A copied question shares the
+  original's answer variable; the review says so
+- Test pages can't be moved or copied (the test's encrypted question list orders them), nor can pages go
+  inside the test; the launch page stays put
+
 **Course rules** (sidebar **Rules** tab)
 - Scans every page's own scripts and lists, in plain words, what the course does by itself:
   - **timers**: how long, what starts them, and what happens when they run out (e.g. a 10-minute timer
@@ -247,6 +264,9 @@ Two sample packages live in `samples/` (regenerate with `npm run sample`):
   used when anything the course launches mentions it, directly or through other used files, so it errs
   towards keeping. The course player's runtime and test files are always kept, the manifest's file
   lists are trimmed to match, and the project itself keeps every file
+- Pictures that only objects you removed in the editor show are listed as their own group, **Pictures of
+  removed objects**. A removed object stays (hidden) in its page's script, so in the download its picture
+  references point at a blank 1×1 image instead of a missing file
 - Images, audio, video, PDFs and fonts are stored as-is (they're already compressed); only text
   files are deflated. On a 240 MB course-sized package this cut export from ~18s to ~3s with
   the same zip size
@@ -397,6 +417,7 @@ src/lib/manifest.ts   imsmanifest.xml parse + edit (keeps unknown XML intact)
 src/lib/structure.ts  which files belong to which module; Lectora chapter recovery
 src/lib/assetRefs.ts  assets a page's source refers to
 src/lib/lectora.ts    Lectora page tracking; delete planning (rewire, tracking, manifest, flags)
+src/lib/pageOps.ts    moving and copying Lectora pages (chain, tracking, TOC, renumbering, manifest)
 src/lib/courseCheck.ts  broken links, loops, tracking and manifest checks
 src/lib/package.ts    zip import/export
 src/lib/html.ts       scripts-disabled edit copy <-> saved HTML

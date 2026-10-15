@@ -5,6 +5,7 @@ import { RulesPanel } from './RulesPanel';
 import { FindReplace } from './FindReplace';
 import { isTypingTarget } from './LiveStage';
 import { deleteFlow } from '../lib/deleteFlow';
+import { pageOpFlow } from '../lib/pageOpFlow';
 import { readLectoraCourse } from '../lib/lectora';
 import { flattenItems, type ItemNode } from '../lib/manifest';
 import { basename, isHtmlFile, isImageFile, isMediaFile, isTextFile } from '../lib/paths';
@@ -88,6 +89,17 @@ function TitleExplorer() {
     setMarked(new Set());
     void deleteFlow.start(label, pages);
   };
+  // A recovered Lectora page: moved and copied through the review (links, tracking, TOC and manifest follow).
+  const lectoraPage = selected?.startsWith('lectora:page:') && marked.size <= 1 ? inferredById.get(selected)?.href : undefined;
+  const pageOrder = lectora ? flattenItems(lectora.modules).flatMap((i) => (i.href ? [i.href] : [])) : [];
+  const nudge = (delta: -1 | 1) => {
+    if (lectoraPage) {
+      const next = pageOrder[pageOrder.indexOf(lectoraPage) + delta];
+      if (next) pageOpFlow.start('move', lectoraPage, delta < 0 ? { before: next } : { after: next });
+      return;
+    }
+    if (editable) void actions.moveItem(selected!, delta);
+  };
   const del = () => {
     if (targets.length) return deleteInferred();
     if (!editable) return;
@@ -162,8 +174,18 @@ function TitleExplorer() {
       <div className="mini-toolbar">
         <button onClick={addPage} title="Add a page after the selected one">＋ Page</button>
         <button onClick={() => editable && setRenaming(selected)} disabled={!editable}>Rename</button>
-        <button onClick={() => editable && void actions.moveItem(selected!, -1)} disabled={!editable} title="Move up">↑</button>
-        <button onClick={() => editable && void actions.moveItem(selected!, 1)} disabled={!editable} title="Move down">↓</button>
+        <button onClick={() => nudge(-1)} disabled={!editable && !lectoraPage} title="Move up">↑</button>
+        <button onClick={() => nudge(1)} disabled={!editable && !lectoraPage} title="Move down">↓</button>
+        {lectora && (
+          <>
+            <button onClick={() => lectoraPage && pageOpFlow.start('move', lectoraPage)} disabled={!lectoraPage} title="Move the selected page anywhere in the course">
+              Move…
+            </button>
+            <button onClick={() => lectoraPage && pageOpFlow.start('copy', lectoraPage)} disabled={!lectoraPage} title="Copy the selected page into the course">
+              ⧉ Copy…
+            </button>
+          </>
+        )}
         <button
           onClick={del}
           disabled={!editable && !targets.length}

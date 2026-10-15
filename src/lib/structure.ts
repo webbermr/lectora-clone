@@ -6,7 +6,7 @@
  */
 import { flattenItems, type ItemNode, type ManifestModel } from './manifest';
 import { referencedAssets } from './assetRefs';
-import { tocTitles } from './lectora';
+import { TRACKING_FILE, readLectoraCourse, tocTitles } from './lectora';
 import type { FileMap } from './package';
 import { basename, splitQuery } from './paths';
 
@@ -99,7 +99,8 @@ export function isLectoraPackage(manifestXml: string, files: FileMap): boolean {
 }
 
 export function inferLectoraStructure(manifest: ManifestModel, files: FileMap): InferredStructure | null {
-  // Page order: as the manifest lists them (course order), then any stragglers.
+  // Page order: Lectora's page tracking (the order the course plays), else as the manifest lists them, then
+  // any stragglers.
   const ordered: string[] = [];
   const seen = new Set<string>();
   const take = (f: string) => {
@@ -108,6 +109,7 @@ export function inferLectoraStructure(manifest: ManifestModel, files: FileMap): 
       ordered.push(f);
     }
   };
+  if (files[TRACKING_FILE]) readLectoraCourse(files, manifest).order.forEach(take);
   for (const r of manifest.resources) for (const f of r.files) take(f);
   for (const f of Object.keys(files).sort()) take(f);
   if (ordered.length < 3) return null;

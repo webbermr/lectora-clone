@@ -218,10 +218,27 @@ export async function publishPackage() {
  * lists, and asset entries left with no files are dropped (with any dependencies on them). The project
  * itself is unchanged.
  */
+/** A 1×1 transparent GIF: what a hidden, removed object is pointed at instead of a picture left out. */
+export const BLANK_GIF = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 export function withoutFiles(files: FileMap, manifest: mf.ManifestModel | null, leaveOut: Set<string>): FileMap {
   if (!leaveOut.size) return files;
   const out: FileMap = {};
   for (const [path, bytes] of Object.entries(files)) if (!leaveOut.has(path)) out[path] = bytes;
+  // Removed objects still name their pictures in the page's script; point those at a blank image, so the hidden
+  // object doesn't ask for a file that isn't there.
+  const pictures = [...leaveOut].filter((p) => /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(p));
+  if (pictures.length) {
+    const quoted = new RegExp(`(['"])(?:\\./)?(${pictures.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\1`, 'g');
+    const names = pictures.map((p) => p.slice(p.lastIndexOf('/') + 1));
+    for (const path of Object.keys(out)) {
+      if (!/\.(x?html?|js)$/i.test(path)) continue;
+      const text = decodeText(out[path]);
+      if (!names.some((n) => text.includes(n))) continue;
+      const next = text.replace(quoted, (_, q) => `${q}${BLANK_GIF}${q}`);
+      if (next !== text) out[path] = encodeText(next);
+    }
+  }
   if (files['imsmanifest.xml'] && manifest) {
     const emptied = manifest.resources.filter((r) => !r.href && r.files.length > 0 && r.files.every((f) => leaveOut.has(f))).map((r) => r.identifier);
     out['imsmanifest.xml'] = encodeText(mf.removeResourcesAndFiles(decodeText(files['imsmanifest.xml']), emptied, leaveOut));

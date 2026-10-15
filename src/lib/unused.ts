@@ -6,15 +6,22 @@
  * test ('_tobj3566') and how scripts often build names ('images/' + id + '.png'). The manifest's own list of
  * files doesn't count, since Lectora lists every file there. This errs towards keeping: any mention keeps a file,
  * whatever it was mentioned for.
+ *
+ * Objects removed in the editor stay in the page's script (hidden; see removeObjects.ts), so their pictures are
+ * still named there. Those lines, and the object's id as a name, don't count: a picture only a removed object
+ * shows is unused, and listed in `removedOnly` too.
  */
 import { textOf } from './assetRefs';
 import type { ManifestModel } from './manifest';
 import type { FileMap } from './package';
-import { basename, isTextFile } from './paths';
+import { basename, isHtmlFile, isTextFile } from './paths';
+import { hiddenIds } from './removeObjects';
 
 export interface UnusedReport {
   paths: string[];
   bytes: number;
+  /** Of those, the pictures (and other files) that only objects removed in the editor show. */
+  removedOnly: string[];
 }
 
 const TOKEN = /[\w$.\-%]+/g;
@@ -29,6 +36,22 @@ const PLAIN = /^[\w$.\-]+$/;
 const ALWAYS =
   /(\.(xsd|dtd)$)|(^|\/)(trivantis[\w.-]*|jquery[\w.-]*|mediaelement[\w.-]*|es6-promise[\w.-]*|enc|aria-utils|apiwrapper\w*|scofunctions|dialog|scorm_?api\w*)\.(js|css)$|(^|\/)_tobj\w*\.txt$/i;
 
+const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A page's text without its removed objects' script lines (`image62895 = new ObjImage('image62895',
+ * 'images/header.png', …)`, `button63648.setImages({…})`), the lines taken out, and the removed ids.
+ */
+function splitRemoved(text: string): { kept: string; removed: string; ids: Set<string> } {
+  const ids = hiddenIds(text);
+  if (!ids.length) return { kept: text, removed: '', ids: new Set() };
+  const own = new RegExp(`^\\s*(?:var\\s+)?(?:${ids.map(reEscape).join('|')})(?:Object)?\\s*(?:=|\\.)`);
+  const kept: string[] = [];
+  const removed: string[] = [];
+  for (const line of text.split('\n')) (own.test(line) ? removed : kept).push(line);
+  return { kept: kept.join('\n'), removed: removed.join('\n'), ids: new Set(ids.map((i) => i.toLowerCase())) };
+}
+
 const stemOf = (name: string) => {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(0, dot) : name;
@@ -36,7 +59,7 @@ const stemOf = (name: string) => {
 
 export function findUnused(files: FileMap, manifest: ManifestModel | null): UnusedReport {
   const all = Object.keys(files);
-  if (!manifest || !files['imsmanifest.xml']) return { paths: [], bytes: 0 };
+  if (!manifest || !files['imsmanifest.xml']) return { paths: [], bytes: 0, removedOnly: [] };
 
   // Name and name-without-extension → files, for looking up what a text mentions.
   const byName = new Map<string, string[]>();
@@ -63,7 +86,8 @@ export function findUnused(files: FileMap, manifest: ManifestModel | null): Unus
     used.add(p);
     if (isTextFile(p)) queue.push(p);
   };
-  const scan = (text: string) => {
+  /** Every file a text mentions; `skip` are names that don't count there (removed objects' ids). */
+  const mentions = (text: string, hit: (p: string) => void, skip?: Set<string>) => {
     for (const m of text.matchAll(TOKEN)) {
       let t = m[0].toLowerCase();
       if (t.includes('%')) {
@@ -75,15 +99,17 @@ export function findUnused(files: FileMap, manifest: ManifestModel | null): Unus
       }
       // Trailing dots from sentences ("see logo.png.") and leading ones from paths ("./x.html").
       t = t.replace(/^\.+|\.+$/g, '');
-      const hit = byName.get(t);
-      if (hit) hit.forEach(use);
+      if (skip?.has(t)) continue;
+      byName.get(t)?.forEach(hit);
     }
     for (const p of odd) {
       if (used.has(p)) continue;
       const name = basename(p);
-      if (text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name))) use(p);
+      if (text.includes(name) || text.includes(encodeURI(name)) || text.includes(encodeURIComponent(name))) hit(p);
     }
   };
+  const scan = (text: string) => mentions(text, use);
+  let removedText = '';
 
   // What the manifest launches and points at, but not its list of every file.
   used.add('imsmanifest.xml');
@@ -91,8 +117,20 @@ export function findUnused(files: FileMap, manifest: ManifestModel | null): Unus
   for (const p of all) if (ALWAYS.test(p)) use(p);
   scan(textOf(files['imsmanifest.xml']).replace(/<(?:\w+:)?file\b[^>]*>/gi, ''));
 
-  while (queue.length) scan(textOf(files[queue.shift()!]));
+  while (queue.length) {
+    const path = queue.shift()!;
+    const text = textOf(files[path]);
+    if (!isHtmlFile(path)) {
+      scan(text);
+      continue;
+    }
+    const page = splitRemoved(text);
+    mentions(page.kept, use, page.ids);
+    if (page.removed) removedText += page.removed + '\n';
+  }
 
   const paths = all.filter((p) => !used.has(p)).sort();
-  return { paths, bytes: paths.reduce((n, p) => n + files[p].length, 0) };
+  const onlyRemoved = new Set<string>();
+  if (removedText) mentions(removedText, (p) => !used.has(p) && onlyRemoved.add(p));
+  return { paths, bytes: paths.reduce((n, p) => n + files[p].length, 0), removedOnly: paths.filter((p) => onlyRemoved.has(p)) };
 }
