@@ -312,10 +312,12 @@ runs the unit tests during the build. Port 8080 only listens on this computer; f
 
 ### Ask SCORM's API key
 
-Put an Anthropic API key in a `.env` file next to `docker-compose.yml`, then restart:
+Put an Anthropic API key in a `.env` file next to `docker-compose.yml`, then restart. The easiest
+start is the example file, which lists every setting with notes:
 
 ```bash
-echo 'ANTHROPIC_API_KEY=sk-ant-…' >> .env
+cp .env.example .env                # Windows PowerShell: Copy-Item .env.example .env
+# edit .env and fill in ANTHROPIC_API_KEY=sk-ant-…
 docker compose up -d
 ```
 
